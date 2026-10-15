@@ -100,9 +100,11 @@ class ImprovementsTests(unittest.TestCase):
 
     def test_missing_word_search_completes_grid_with_one_unlisted_word(self):
         # BAT/ORE/WED across, BOW/ARE/TED down; WED is absent from the list.
+        # The transposed grid fits the same numbers just as well, so the
+        # known A pins the orientation (otherwise the tie-break decides).
         letters = 'BATOREWED'
         numbers = [ 'BATORWED'.index(l)+1 for l in letters]
-        p = puzzle(3,3,numbers,allowUnknownWords=True)
+        p = puzzle(3,3,numbers,{1:'A'},allowUnknownWords=True)
         r = solve(p,['BAT','ORE','BOW','ARE','TED','TOE','BED'])
         self.assertEqual(''.join(r['solutions'][0]['letters']),letters)
         self.assertEqual(r['stats']['unsupportedWords'],1)
