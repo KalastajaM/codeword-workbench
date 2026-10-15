@@ -1,0 +1,690 @@
+'use strict';
+const $ = id => document.getElementById(id);
+const flags = {'open-before-across':'openBeforeAcross','open-after-across':'openAfterAcross','open-before-down':'openBeforeDown','open-after-down':'openAfterDown'};
+let puzzle, selected=0, editMode=true, solutionIndex=0, revision=0, validateTimer, ocrAvailable=false, dictionaryLanguage='en', loadToken=0;
+const rules = () => ({maxLettersPerNumber:1, uniqueLetters:true, forbiddenPatterns:[], discouragedPatterns:[]});
+function fresh(rows=7,cols=7,language='en') {return {name:'Untitled puzzle',rows,cols,language,useDictionary:true,rules:rules(),cells:Array.from({length:rows*cols},PuzzleState.blankCell)};}
+let numericEntry=null,alignmentDirty=false,fitMode='width',viewScale=1;
+const acceptanceHistory=PuzzleState.acceptanceHistory();
+let wordDirection='Across',lastClickedCell=null;
+let candidateKeys=new Set(),candidateResult=null,candidateBusy=false,candidateRequest=0;
+let solvedWordFilter='all',solvedWordSort='uncertain';
+function notify(message,error=false){$('notice').textContent=message;$('notice').classList.toggle('error',error);$('notice').hidden=false;}
+let confirmPending=null;
+function confirmAction(message,title="Replace current work?"){
+ if(confirmPending)return Promise.resolve(false);
+ const dialog=$('confirm-dialog');
+ $('confirm-title').textContent=title;$('confirm-message').textContent=message;
+ dialog.returnValue='';
+ return new Promise(resolve=>{confirmPending={resolve,puzzle,revision};dialog.showModal();});
+}
+$('confirm-cancel').onclick=()=>$('confirm-dialog').close('cancel');
+$('confirm-continue').onclick=()=>$('confirm-dialog').close('continue');
+$('confirm-dialog').addEventListener('close',()=>{
+ const pending=confirmPending;confirmPending=null;
+ if(!pending)return;
+ const current=pending.puzzle===puzzle&&pending.revision===revision;
+ const accepted=$('confirm-dialog').returnValue==='continue';
+ if(accepted&&!current)notify('The workspace changed while you were reviewing this action. Please try again.');
+ pending.resolve(accepted&&current);
+});
+async function api(path,body,method){const response=await fetch(path,{method:method||(body?'POST':'GET'),headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});const result=await response.json();if(!response.ok)throw new Error(result.error||'Request failed');return result;}
+function protect(fn){return async(...args)=>{try{await fn(...args);}catch(error){notify(error.message,true);}};}
+function invalidate(){clearCandidateResults();clearLookup();acceptanceHistory.clear();if($('solve-status').textContent)$('solve-status').textContent='Puzzle changed. Solve again for current suggestions.';solveJob.cancel();revision++;delete puzzle.suggestions;PuzzleState.refreshDeductions(puzzle,false);solutionIndex=0;clearTimeout(validateTimer);validateTimer=setTimeout(validate,180);}
+async function validate(){const version=revision;try{const result=await api('/api/validate',puzzle);if(version===revision){$('conflicts').textContent=result.conflicts.join(' · ');eliminationSuggestions=result.valid&&Array.isArray(result.suggestedEliminations)?result.suggestedEliminations:[];renderEliminations();}}catch(error){if(version===revision){$('conflicts').textContent=error.message;eliminationSuggestions=[];renderEliminations();}}}
+function solution(){return puzzle.suggestions?.solutions?.[solutionIndex];}
+function suggestion(i){return PuzzleState.suggestedLetter(puzzle,i,solutionIndex);}
+function isDeduction(i){const forced=puzzle.suggestions?.forcedLetters?.[i];return !!forced&&suggestion(i)===forced;}
+function normalize(text){return text.normalize('NFC').toUpperCase();}
+function setPuzzle(value,editing=true){straightenHandles=null;clearLookup();if(typeof dictionaryEditor!=='undefined'){dictionaryEditor.cancel();$('dictionary-dialog').close();}wordDirection='Across';lastClickedCell=null;editMode=editing;clearCandidateResults(true);$('solve-status').textContent='';fitMode='width';acceptanceHistory.clear();numericEntry=null;puzzle=PuzzleState.canonicalPuzzle(value);PuzzleState.refreshDeductions(puzzle);selected=0;solutionIndex=0;solveJob.cancel();revision++;syncControls();render();validate();savedFingerprint=workspaceFingerprint();}
+function syncControls(){$('number-position').value=puzzle.numberPosition;$('search-mode').value=puzzle.searchMode;$('allow-unknown-words').checked=puzzle.allowUnknownWords;alignmentDirty=false;$('alignment-status').textContent='';for(const key of ['name','rows','cols','language'])$(key).value=puzzle[key];$('use-dictionary').checked=puzzle.useDictionary;$('capacity').value=puzzle.rules.maxLettersPerNumber;$('forbidden').value=puzzle.rules.forbiddenPatterns.join('\n');$('discouraged').value=puzzle.rules.discouragedPatterns.join('\n');const bounds=puzzle.imageBounds||{x:0,y:0,width:1,height:1};for(const key of ['x','y','width','height'])$('bound-'+key).value=Math.round(bounds[key]*1000)/10;}
+function render(){renderGrid();renderStraighten();renderInspector();renderMapping();renderResults();renderCandidatePanel();renderEditMode();}
+function renderGrid(){const grid=$('grid'), stage=$('board-stage'),image=$('puzzle-image');$('review-legend').hidden=!puzzle.cells.some(c=>!c.black&&(c.numberReview==='check'&&c.number||c.numberReview==='missing'&&!c.number));grid.dataset.numberPosition=puzzle.numberPosition;grid.replaceChildren();grid.style.gridTemplateColumns=`repeat(${puzzle.cols}, 1fr)`;grid.style.gridTemplateRows=`repeat(${puzzle.rows}, 1fr)`;stage.classList.toggle('image-mode',!!puzzle.image);image.hidden=!puzzle.image;$('image-controls').hidden=!puzzle.image;$('grid-summary').textContent=`${puzzle.rows} × ${puzzle.cols} · ${PuzzleState.languagePresentation(puzzle).name} · ${puzzle.cells.filter(c=>!c.black&&c.letter).length} confirmed`;if(puzzle.image){if(image.src!==puzzle.image)image.src=puzzle.image;const b=puzzle.imageBounds||{x:0,y:0,width:1,height:1};Object.assign(grid.style,{left:b.x*100+'%',top:b.y*100+'%',width:b.width*100+'%',height:b.height*100+'%'});}else{stage.style.width='';for(const key of ['left','top','width','height'])grid.style[key]='';}
+puzzle.cells.forEach((cell,i)=>{const button=document.createElement('button');button.className='cell'+(cell.black?' black':'')+(cell.clue?' clue':'')+(cell.highlight?' highlight':'')+(selected===i?' selected':'');button.type='button';button.setAttribute('role','gridcell');button.setAttribute('aria-selected',String(selected===i));button.tabIndex=selected===i?0:-1;button.setAttribute('aria-label',`Row ${Math.floor(i/puzzle.cols)+1}, column ${i%puzzle.cols+1}, ${cell.clue?'image clue area':cell.black?'black':`number ${cell.number||'none'}${cell.numberReview==='check'&&cell.number?' (check recognition)':cell.numberReview==='missing'&&!cell.number?' (not recognized)':''}, ${cell.letter?'confirmed '+cell.letter:suggestion(i)?'suggested '+suggestion(i):'empty'}`}`);if(!cell.black){const number=document.createElement('span'),review=cell.numberReview==='missing'&&!cell.number?'missing':cell.numberReview==='check'&&cell.number?'check':'';number.className='number'+(review?' review-'+review:'');number.textContent=review==='missing'?'?':cell.number;if(review)number.title=review==='missing'?'No number recognized here. Enter it from the image.':'Recognized number may be wrong. Check it against the image.';const letter=document.createElement('span');letter.className='letter'+(!cell.letter?(isDeduction(i)?' deduction':' provisional'):'');letter.textContent=cell.letter||suggestion(i);button.append(number,letter);for(const [flag,side] of [['openBeforeAcross','left'],['openAfterAcross','right'],['openBeforeDown','top'],['openAfterDown','bottom']]){if(cell[flag]&&isEndpoint(i,side)){const mark=document.createElement('i');mark.className='boundary '+side;button.append(mark);}}}button.onclick=()=>{numericEntry=null;const word=PuzzleState.cellWord(puzzle,i,i===lastClickedCell?wordDirection:'Across',i===lastClickedCell,solutionIndex);selected=i;lastClickedCell=i;wordDirection=word?.direction||'Across';render(); $('grid').children[selected].focus();};button.onkeydown=e=>gridKey(e);grid.append(button);});renderWordHighlights();updateView();}
+function isEndpoint(i,side){const r=Math.floor(i/puzzle.cols),c=i%puzzle.cols;return side==='left'?(c===0||puzzle.cells[i-1].black):side==='right'?(c===puzzle.cols-1||puzzle.cells[i+1].black):side==='top'?(r===0||puzzle.cells[i-puzzle.cols].black):(r===puzzle.rows-1||puzzle.cells[i+puzzle.cols].black);}
+function renderInspector(){const c=puzzle.cells[selected];$('cell-position').textContent=`${Math.floor(selected/puzzle.cols)+1}, ${selected%puzzle.cols+1}`;$('cell-black').checked=c.black;$('cell-clue').checked=!!c.clue;$('cell-number').value=c.number;$('cell-letter').value=c.letter||suggestion(selected)||'';$('cell-number').disabled=c.black||!editMode;$('cell-letter').disabled=c.black||(!editMode&&c.prefilled);for(const [id,key]of Object.entries(flags)){$(id).checked=!!c[key];$(id).disabled=!editMode||c.black||!isEndpoint(selected,{'open-before-across':'left','open-after-across':'right','open-before-down':'top','open-after-down':'bottom'}[id]);}$('cell-suggestion').textContent=!c.letter&&suggestion(selected)?`${PuzzleState.suggestionLabel(puzzle,selected,solutionIndex)}: ${suggestion(selected)}`:'';$('cell-confirmed').checked=!!c.letter;$('cell-confirmed').disabled=c.black||(!c.letter&&!suggestion(selected))||(!editMode&&c.prefilled);renderCellRuledOut();}
+
+function renderMapping(){
+ renderEliminations();
+ const map=new Map();
+ puzzle.cells.forEach((cell,i)=>{if(cell.black||!cell.number)return;if(!map.has(cell.number))map.set(cell.number,{known:new Set(),proposed:new Set()});if(cell.letter)map.get(cell.number).known.add(cell.letter);else if(suggestion(i))map.get(cell.number).proposed.add(suggestion(i));});
+ const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ'+(PuzzleState.nordicLetters(puzzle.language)?'ÅÄÖ':'');
+ const matched=new Set([...map.values()].flatMap(sets=>[...sets.known,...sets.proposed]));
+ const unmatched=[...alphabet].filter(letter=>!matched.has(letter));
+ const unmatchedRoot=$('unmatched-letters');unmatchedRoot.replaceChildren();
+ const unmatchedZone=unmatchedRoot.parentElement;
+ unmatchedZone.ondragover=event=>{if(draggedAssigned&&assignmentCurrent(draggedAssigned)){event.preventDefault();event.dataTransfer.dropEffect='move';unmatchedZone.classList.add('drag-over');}};
+ unmatchedZone.ondragleave=event=>{if(!unmatchedZone.contains(event.relatedTarget))unmatchedZone.classList.remove('drag-over');};
+ unmatchedZone.ondrop=protect(async event=>{event.preventDefault();unmatchedZone.classList.remove('drag-over');const source=draggedAssigned;draggedAssigned=null;if(!source||!assignmentCurrent(source))return;await removeNumberAssignment(source);});
+ if(pickedUnmatched&&(!assignmentCurrent(pickedUnmatched)||!unmatched.includes(pickedUnmatched.letter)))pickedUnmatched=null;
+ if(!unmatched.length)unmatchedRoot.textContent='None. All letters have a match.';
+ unmatched.forEach(letter=>{const button=document.createElement('button');button.type='button';button.className='unmatched-letter';button.textContent=letter;button.draggable=true;button.setAttribute('aria-label',`Select ${letter}, then choose an empty number box`);button.setAttribute('aria-pressed',String(pickedUnmatched?.letter===letter));
+  button.onclick=()=>{pickedUnmatched=pickedUnmatched?.letter===letter?null:{...assignmentContext(),letter};renderMapping();};
+  button.ondragstart=event=>{draggedAssigned=null;draggedUnmatched={...assignmentContext(),letter};event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',letter);};
+  button.ondragend=()=>{draggedUnmatched=null;document.querySelectorAll('.map-item.drag-over').forEach(tile=>tile.classList.remove('drag-over'));};unmatchedRoot.append(button);
+ });
+ const root=$('mapping');root.replaceChildren();
+ if(!map.size){root.textContent='Add numbers to build your mapping.';root.className='hint';return;}
+ root.className='mapping-grid';
+ [...map].sort((a,b)=>Number(a[0])-Number(b[0])).forEach(([num,sets])=>{
+  const tile=document.createElement('div');tile.className='map-item';let suppressClickUntil=0;
+  const letters=[...new Set([...sets.known,...sets.proposed])];
+  tile.ondragover=event=>{const source=draggedAssigned||draggedUnmatched;if(source&&assignmentCurrent(source)&&(draggedAssigned||unmatched.includes(source.letter))){event.preventDefault();event.dataTransfer.dropEffect='move';tile.classList.add('drag-over');}};
+  tile.ondragleave=()=>tile.classList.remove('drag-over');
+  tile.ondrop=protect(async event=>{event.preventDefault();tile.classList.remove('drag-over');const assigned=draggedAssigned,source=assigned||draggedUnmatched;draggedAssigned=null;draggedUnmatched=null;if(!source||!assignmentCurrent(source))return;if(assigned)await moveNumberAssignment(source,num);else if(unmatched.includes(source.letter))await applyNumberAssignment({...source,number:num},source.letter);});
+  const startDrag=letter=>event=>{event.stopPropagation();suppressClickUntil=Infinity;draggedUnmatched=null;draggedAssigned={...assignmentContext(),number:num,letter};event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',letter);};
+  const endDrag=()=>{suppressClickUntil=Date.now()+300;draggedAssigned=null;unmatchedZone.classList.remove('drag-over');document.querySelectorAll('.map-item.drag-over').forEach(item=>item.classList.remove('drag-over'));};
+  if(letters.length!==1){const number=document.createElement('span');number.className='map-number';number.textContent=num;tile.append(number);}
+  if(!letters.length){const empty=document.createElement('button');empty.type='button';empty.className='map-assign';empty.textContent='·';empty.setAttribute('aria-label',`Assign a letter to number ${num}, empty`);empty.onclick=()=>openNumberAssignment(num);tile.append(empty);}
+  letters.forEach(letter=>{
+   const info=PuzzleState.mappingLetterInfo(puzzle,num,letter,solutionIndex),button=document.createElement('button');button.type='button';button.className='map-assign '+info.status;button.dataset.number=num;button.dataset.letter=letter;
+   if(letters.length===1){const number=document.createElement('span');number.className='map-number';number.textContent=num;button.append(number);}
+   const value=document.createElement('span');value.className='map-assignment-letters '+info.status;value.textContent=letter;button.append(value);
+   const next=info.status==='confirmed'?'suggested':info.status==='suggested'&&puzzle.rules.maxLettersPerNumber===1?'mapping':'confirmed';
+   const status=info.status==='mapping'?'mapping deduction':info.status;
+   button.title=`${letter}: ${status}. Click to make ${next}. Delete or Backspace removes this letter.${puzzle.rules.maxLettersPerNumber!==1?' Mapping is unavailable when a number allows multiple letters.':''}`;
+   button.setAttribute('aria-label',`Number ${num}, ${letter}, ${status}. Change to ${next}. Press Delete or Backspace to remove.`);
+   button.onclick=protect(async()=>{if(Date.now()>=suppressClickUntil)await cycleMappingLetter({...assignmentContext(),number:num,letter});});
+   button.onkeydown=protect(async event=>{if(['Delete','Backspace'].includes(event.key)){event.preventDefault();event.stopPropagation();await removeNumberAssignment({...assignmentContext(),number:num,letter});}});
+   button.draggable=true;button.ondragstart=startDrag(letter);button.ondragend=endDrag;tile.append(button);
+  });
+  root.append(tile);
+ });
+}
+// Ruled-out letters and rejected words are hard rules for this puzzle, so a
+// change invalidates suggestions like any other constraint edit.
+let eliminationSuggestions=[];
+function alphabetLetters(){return 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'+(PuzzleState.nordicLetters(puzzle.language)?'ÅÄÖ':'');}
+function ruleOut(number,letters,ruledOut=true){if(!PuzzleState.setRuledOut(puzzle,number,letters,ruledOut))return;invalidate();render();$('solve-status').textContent=ruledOut?`Number ${Number(number)} is not ${letters.join(', ')}. Solve again to use this.`:`${letters.join(', ')} allowed again for number ${Number(number)}.`;}
+function ruledOutButton(number,letter){const button=document.createElement('button');button.type='button';button.className='ruled-out-letter';button.textContent=letter;button.title=`Allow ${letter} for number ${Number(number)} again`;button.setAttribute('aria-label',button.title);button.onclick=()=>ruleOut(number,[letter],false);return button;}
+function renderCellRuledOut(){
+ const c=puzzle.cells[selected],box=$('cell-ruled-out'),entry=c.number&&PuzzleState.visibleRuledOut(puzzle,solutionIndex).find(item=>item.number===String(Number(c.number)));
+ // A number that shows a letter needs no ruling out, unless a confirmed letter is itself ruled out.
+ box.hidden=c.black||!c.number||(!PuzzleState.numberIsOpen(puzzle,c.number,solutionIndex)&&!entry);if(box.hidden)return;
+ $('cell-ruled-out-title').textContent=`Number ${Number(c.number)} is not`;
+ const list=$('cell-ruled-out-letters'),letters=entry?entry.letters:[];list.replaceChildren();
+ $('cell-ruled-out-summary').textContent=`Rule out letters for number ${Number(c.number)}`+(letters.length?` · ${letters.length} ruled out`:'');
+ if(!letters.length)list.textContent='No letters ruled out.';
+ for(const letter of letters)list.append(ruledOutButton(c.number,letter));
+}
+$('rule-out-add').onclick=()=>{const c=puzzle.cells[selected],letter=normalize($('rule-out-letter').value.trim());if(c.black||!c.number||!letter)return;if(letter.length!==1||!alphabetLetters().includes(letter)){notify('Enter one letter of the selected alphabet.',true);return;}$('rule-out-letter').value='';ruleOut(c.number,[letter]);};
+$('rule-out-letter').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();$('rule-out-add').click();}};
+function renderEliminations(){
+ const list=$('ruled-out-list');list.replaceChildren();
+ const entries=PuzzleState.visibleRuledOut(puzzle,solutionIndex).map(entry=>[entry.number,entry.letters]);
+ if(!entries.length)list.textContent='None.';
+ for(const [number,letters] of entries){const row=document.createElement('span');row.className='ruled-out-row';const label=document.createElement('span');label.textContent=`${number} ≠`;row.append(label,...letters.map(letter=>ruledOutButton(number,letter)));list.append(row);}
+ const groups=PuzzleState.eliminationSuggestionGroups(puzzle,eliminationSuggestions,solutionIndex),root=$('elimination-suggestions'),language=PuzzleState.languagePresentation(puzzle).name;root.replaceChildren();
+ $('rule-out-all').hidden=!groups.length;
+ const ruledCount=entries.reduce((sum,[,letters])=>sum+letters.length,0),suggestedCount=groups.reduce((sum,group)=>sum+group.letters.length,0);
+ $('ruled-out-summary').textContent='Ruled-out letters'+(ruledCount?` · ${ruledCount} ruled out`:'')+(suggestedCount?` · ${suggestedCount} suggested`:'');
+ if(!groups.length){root.className='hint';root.textContent='No suggestions. They appear when known letters sit next to a number without a letter.';return;}
+ root.className='';
+ for(const group of groups){
+  const row=document.createElement('div');row.className='ruled-out-row';const label=document.createElement('span');label.textContent=`${group.number} ≠`;row.append(label);
+  for(const {letter,run} of group.letters){const button=document.createElement('button');button.type='button';button.className='suggested-elimination';button.textContent=letter;button.title=`Rule out ${letter} for number ${group.number}: ${run} practically never occurs in ${language} words.`;button.setAttribute('aria-label',button.title);button.onclick=()=>ruleOut(group.number,[letter]);row.append(button);}
+  if(group.letters.length>1){const all=document.createElement('button');all.type='button';all.className='rule-out-group';all.textContent='All';all.title=`Rule out all ${group.letters.length} suggested letters for number ${group.number}`;all.setAttribute('aria-label',all.title);all.onclick=()=>ruleOut(group.number,group.letters.map(item=>item.letter));row.append(all);}
+  root.append(row);
+ }
+}
+$('rule-out-all').onclick=()=>{const groups=PuzzleState.eliminationSuggestionGroups(puzzle,eliminationSuggestions,solutionIndex);let count=0;for(const group of groups)if(PuzzleState.setRuledOut(puzzle,group.number,group.letters.map(item=>item.letter)))count+=group.letters.length;if(!count)return;invalidate();render();$('solve-status').textContent=`Ruled out ${count} suggested letters for ${groups.length} number${groups.length===1?'':'s'}. Solve again to use them.`;};
+function rejectWord(slot,word,rejected=true){if(!PuzzleState.setWordRejected(puzzle,slot,word,rejected))return;invalidate();render();$('solve-status').textContent=rejected?`${word} rejected for this word. Solve again for other suggestions.`:`${word} allowed again for this word.`;}
+function renderCurrentWordRejection(current){
+ const box=$('current-word-rejection'),full=PuzzleState.completeWordText(puzzle,current,solutionIndex),rejected=PuzzleState.rejectedWordsFor(puzzle,current),canReject=!!(full&&full.provisional);
+ box.hidden=!current||(!canReject&&!rejected.length);if(box.hidden)return;
+ const button=$('reject-current-word');button.hidden=!canReject;if(canReject){button.textContent=`${full.text} is wrong here`;button.onclick=()=>rejectWord(current,full.text);}
+ const list=$('current-rejected-words');list.replaceChildren();list.hidden=!rejected.length;
+ if(rejected.length)list.append('Rejected here:');
+ for(const word of rejected){const restore=document.createElement('button');restore.type='button';restore.className='ruled-out-letter';restore.textContent=word;restore.title=`Allow ${word} here again`;restore.setAttribute('aria-label',restore.title);restore.onclick=()=>rejectWord(current,word,false);list.append(restore);}
+}
+let numberPending=null,draggedUnmatched=null,draggedAssigned=null,pickedUnmatched=null;
+function assignmentContext(){return {puzzle,revision,editMode,solutionIndex,suggestions:puzzle.suggestions};}
+function assignmentCurrent(context){return (!context.dialog||numberPending===context)&&context.puzzle===puzzle&&context.revision===revision&&context.editMode===editMode&&context.solutionIndex===solutionIndex&&context.suggestions===puzzle.suggestions;}
+function openNumberAssignment(number){
+ numberPending={...assignmentContext(),number,dialog:true};
+ $('assign-number-title').textContent=`Assign a letter to number ${number}`;
+ $('assign-number-letter').value=pickedUnmatched&&assignmentCurrent(pickedUnmatched)?pickedUnmatched.letter:'';
+ pickedUnmatched=null;$('assign-number-error').textContent='';$('assign-number-apply').disabled=false;
+ $('assign-number-status').value='confirmed';$('assign-number-status').querySelector('[value="mapping"]').disabled=puzzle.rules.maxLettersPerNumber!==1;$('assign-number-status-help').textContent=puzzle.rules.maxLettersPerNumber!==1?'Mapped is unavailable when a number allows multiple letters.':'Mapped keeps one fixed anchor and derives the other occurrences.';
+ $('assign-number-dialog').showModal();$('assign-number-letter').focus();
+}
+async function applyNumberAssignment(context,letter,status='confirmed'){
+ if(!assignmentCurrent(context))throw new Error('The puzzle changed. Please select the number again.');
+ const plan=PuzzleState.numberAssignmentPlan(puzzle,context.number,letter,solutionIndex,editMode,status);
+ const warnings=[];
+ if(plan.previous.length)warnings.push(`Number ${plan.number} already contains ${plan.previous.join(', ')}. Replace these letters with ${plan.letter} in every occurrence?`);
+ if(plan.owners.length)warnings.push(`${plan.letter} is already assigned to number${plan.owners.length>1?'s':''} ${plan.owners.join(', ')}. Remove that letter from those numbers and move it to number ${plan.number}?`);
+ if(warnings.length&&!await confirmAction(warnings.join(' '),'Replace number assignment?'))return false;
+ if(!assignmentCurrent(context))throw new Error('The puzzle changed. Please select the number again.');
+ const validation=await api('/api/validate',plan.trial);
+ if(!assignmentCurrent(context))throw new Error('The puzzle changed. Please select the number again.');
+ if(!validation.valid)throw new Error(validation.conflicts.join(' · '));
+ solveJob.cancel();puzzle.cells=plan.trial.cells;
+ if(plan.trial.suggestions)puzzle.suggestions=plan.trial.suggestions;else delete puzzle.suggestions;
+ clearCandidateResults();clearLookup();acceptanceHistory.push(plan.snapshot);revision++;solutionIndex=0;numericEntry=null;
+ $('solve-status').textContent=`${plan.letter} assigned to number ${plan.number} as ${plan.status==='mapping'?'mapped':plan.status}. Undo is available.`;
+ render();validate();return true;
+}
+async function removeNumberAssignment(context){
+ if(!assignmentCurrent(context))throw new Error('The puzzle changed. Please drag the letter again.');
+ const plan=PuzzleState.numberRemovalPlan(puzzle,context.number,context.letter,solutionIndex,editMode);
+ if(!await confirmAction(`Remove ${plan.letter} from every occurrence of number ${plan.number}? Numbers and other letters stay. You can undo this change.`,'Remove number assignment?'))return false;
+ if(!assignmentCurrent(context))throw new Error('The puzzle changed. Please drag the letter again.');
+ solveJob.cancel();puzzle.cells=plan.trial.cells;
+ if(plan.trial.suggestions)puzzle.suggestions=plan.trial.suggestions;else delete puzzle.suggestions;
+ clearCandidateResults();clearLookup();acceptanceHistory.push(plan.snapshot);revision++;solutionIndex=0;numericEntry=null;
+ $('solve-status').textContent=`Removed ${plan.letter} from number ${plan.number}. Undo is available.`;
+ render();validate();return true;
+}
+$('assign-number-dialog').addEventListener('close',()=>{numberPending=null;});
+$('assign-number-form').onsubmit=async event=>{
+ event.preventDefault();const pending=numberPending;if(!pending)return;
+ $('assign-number-error').textContent='';$('assign-number-apply').disabled=true;
+ try{if(await applyNumberAssignment(pending,$('assign-number-letter').value,$('assign-number-status').value))$('assign-number-dialog').close();}
+ catch(error){if(numberPending===pending)$('assign-number-error').textContent=error.message;}
+ finally{if(numberPending===pending)$('assign-number-apply').disabled=false;}
+};
+async function cycleMappingLetter(context){
+ if(!assignmentCurrent(context))return false;
+ const plan=PuzzleState.mappingCyclePlan(puzzle,context.number,context.letter,solutionIndex,editMode);
+ const validation=await api('/api/validate',plan.trial);
+ if(!assignmentCurrent(context))return false;
+ if(!validation.valid&&plan.action!=='suggested')throw new Error(validation.conflicts.join(' · '));
+ solveJob.cancel();puzzle.cells=plan.trial.cells;
+ if(plan.trial.suggestions)puzzle.suggestions=plan.trial.suggestions;else delete puzzle.suggestions;
+ clearCandidateResults();clearLookup();acceptanceHistory.push(plan.snapshot);revision++;solutionIndex=0;numericEntry=null;
+ $('solve-status').textContent=`Number ${plan.number}: ${plan.letter} is now ${plan.action}. Undo is available.`;
+ render();validate();
+ const control=[...$('mapping').querySelectorAll('button')].find(button=>button.dataset.number===plan.number&&button.dataset.letter===plan.letter);control?.focus();
+ return true;
+}
+async function moveNumberAssignment(context,target){
+ if(!assignmentCurrent(context))return false;
+ const plan=PuzzleState.numberMovePlan(puzzle,context.number,target,context.letter,solutionIndex,editMode);
+ if(!plan)return false;
+ const occupied=plan.previous.length?` Number ${target} already contains ${plan.previous.join(', ')}; replace those letters?`:'';
+ const owners=plan.owners.length?` Also remove ${plan.letter} from number${plan.owners.length>1?'s':''} ${plan.owners.join(', ')} to keep distinct letters.`:'';
+ if(!await confirmAction(`Move ${plan.letter} from number ${context.number} to number ${target}? This removes that letter from the source and confirms it in every target cell.${occupied}${owners}`,'Move number assignment?'))return false;
+ if(!assignmentCurrent(context))return false;
+ const validation=await api('/api/validate',plan.trial);
+ if(!assignmentCurrent(context))return false;
+ if(!validation.valid)throw new Error(validation.conflicts.join(' · '));
+ solveJob.cancel();puzzle.cells=plan.trial.cells;
+ if(plan.trial.suggestions)puzzle.suggestions=plan.trial.suggestions;else delete puzzle.suggestions;
+ clearCandidateResults();clearLookup();acceptanceHistory.push(plan.snapshot);revision++;solutionIndex=0;numericEntry=null;
+ $('solve-status').textContent=`Moved ${plan.letter} from number ${context.number} to number ${target}. Undo is available.`;
+ render();validate();return true;
+}
+$('reset-suggestions').onclick=()=>{
+ solveJob.cancel();clearCandidateResults();acceptanceHistory.clear();numericEntry=null;
+ PuzzleState.resetSuggestions(puzzle);solutionIndex=0;revision++;clearTimeout(validateTimer);
+ $('solve-status').textContent='Suggestions reset. Confirmed letters and their mapping deductions are kept.';render();validate();
+};
+$('reset-progress').onclick=protect(async()=>{
+ if(!await confirmAction('Clear answer letters, suggestions, pencil marks, ruled-out letters and rejected words? Prefilled letters are kept in Puzzle mode and cleared in Edit mode. The grid, numbers, image and settings will stay. This clears undo history. Saved puzzles are unchanged until you save.','Reset puzzle?'))return;
+ solveJob.cancel();clearCandidateResults(true);acceptanceHistory.clear();numericEntry=null;
+ const givens=!editMode?puzzle.cells.map(c=>c.prefilled?c.letter:''):[];
+ PuzzleState.resetProgress(puzzle);puzzle.cells.forEach((c,i)=>{c.letter=givens[i]||'';c.prefilled=!!c.letter;});solutionIndex=0;revision++;clearTimeout(validateTimer);
+ $('solve-status').textContent='Puzzle reset. The puzzle is ready to start again.';render();validate();
+});
+function renderResults(){$('undo-acceptance').disabled=!acceptanceHistory.length;const data=puzzle.suggestions,current=solution(),gridWords=PuzzleState.displayedPuzzleWords(puzzle,solutionIndex).map(word=>PuzzleState.assessedWord(word,wordChecks.ensure(puzzle,word))),deductions=(data?.forcedLetters||[]).filter((l,i)=>l&&!puzzle.cells[i]?.letter&&!puzzle.cells[i]?.black).length;$('deduction-results').hidden=!deductions;$('deduction-count').textContent=`${deductions} mapping deductions from confirmed number–letter pairs. These remain provisional until accepted.`;$('solver-mode').textContent=puzzle.useDictionary?'Dictionary mode: editable words'+(puzzle.language==='fi'&&puzzle.useMorphology!==false?' and local Finnish morphology':'')+(puzzle.allowUnknownWords?'; missing words allowed as unverified guesses.':'.'):'Dictionary-free mode: language-pattern guesses can include invented words.';$('retry-word-checks').hidden=!gridWords.some(word=>word.assessmentStatus==='error');$('result-empty').hidden=!!current;$('result-content').hidden=!gridWords.length&&!current;$('result-alternatives').hidden=!current;$('accept-all').disabled=!current;$('diagnostics').textContent=data?.diagnostics?.join(' · ')||'';if(data&&!current){$('result-empty').hidden=false;$('result-empty').textContent=data.partialLetters?.some((letter,i)=>letter&&!puzzle.cells[i].letter)?'Partial hypothesis displayed on the grid. It is unverified and is not a complete solution. Review or confirm individual cells and words.':deductions?'No full suggestion found. Mapping deductions are available on the grid.':'No suggestions found in this search. Review the diagnostics, dictionary, and constraints.';}else if(!data)$('result-empty').textContent='Words currently displayed in the grid. Complete words are checked automatically.';if(!gridWords.length&&!current)$('result-empty').textContent='No Across or Down words of two or more cells in this grid. Add connected cells to see word rows.';const alternatives=$('alternatives');alternatives.replaceChildren();(current?data.solutions:[]).forEach((s,i)=>{const opt=document.createElement('option');opt.value=i;opt.textContent=`${i+1} of ${data.solutions.length} · score ${Number(s.score).toFixed(2)}`;alternatives.append(opt);});alternatives.value=solutionIndex;$('result-meta').textContent=current?`${PuzzleState.solveStopExplanation(data.status,data.stats)} ${data.stats?.exhaustive?'Search completed for the current dictionary and constraints.':'Bounded search; alternatives are not exhaustive.'} ${puzzle.useDictionary?'Word sources are labelled below. Fragments and words without vocabulary evidence remain unverified.':'Generated candidates are unverified and may not be real words.'}`:'Complete words are checked against the dictionary and letter patterns. Unknown letters are shown as ·.';const words=$('word-results');words.replaceChildren();const visibleWords=PuzzleState.solvedWordsView(gridWords,solvedWordFilter,solvedWordSort,puzzle.language);$('solved-word-count').textContent=gridWords.length?`Showing ${visibleWords.length} of ${gridWords.length} words${visibleWords.length?'':'. No words match this filter.'}`:'No Across or Down words of two or more cells in this grid.';visibleWords.forEach(word=>{const row=document.createElement('div');row.className='word-row';const text=document.createElement('button');text.type='button';text.className='word-jump';text.textContent=word.text;const location=PuzzleState.solvedWordSelection(puzzle,word);text.disabled=!location;text.setAttribute('aria-label',location?`Select ${word.text}, ${location.direction}, row ${Math.floor(location.index/puzzle.cols)+1}, column ${location.index%puzzle.cols+1}`:`${word.text}, no matching grid word`);text.onclick=()=>jumpToSolvedWord(word);const state=document.createElement('small');const confirmed=word.cells.filter(i=>puzzle.cells[i].letter).length;const pattern=word.assessmentStatus==='ready'?(PuzzleState.plausibilityLabel(word.plausibility)||'Pattern unassessed'):'';state.textContent=PuzzleState.assessedWordLabel(word)+(pattern?' · '+pattern:'')+' · '+(confirmed===word.cells.length?'Confirmed':`${confirmed}/${word.cells.length} confirmed`);state.title=PuzzleState.plausibilityDetail(word.plausibility);const score=document.createElement('small');score.className='solved-pattern-score';score.textContent=PuzzleState.solvedWordPatternScore(word);score.title='Lower (more negative) pattern scores mean less typical letter sequences. This is not a probability, dictionary check or proof of the answer.';const statusGroup=document.createElement('div');statusGroup.className='word-status';statusGroup.append(state,score);row.append(text,statusGroup);const actionGroup=document.createElement('div');actionGroup.className='word-actions';const actions=PuzzleState.solvedWordActions(puzzle,word,solutionIndex,editMode);if(actions.confirm){const button=document.createElement('button');button.type='button';button.textContent=actions.confirmLabel;button.dataset.help='Confirm the remaining suggested letters in this word. Already confirmed letters stay unchanged.';button.onclick=()=>accept(word.cells);actionGroup.append(button);}if(actions.unconfirm){const revoke=document.createElement('button');revoke.type='button';revoke.textContent=actions.unconfirmLabel;revoke.dataset.help='Unconfirm the currently confirmed letters in this word and keep them as provisional notes. Prefilled letters stay locked in Puzzle mode.';revoke.onclick=()=>unconfirm(word.cells);actionGroup.append(revoke);}if(!word.unknownCount&&word.cells.some(i=>!puzzle.cells[i].letter)){const reject=document.createElement('button');reject.type='button';reject.textContent='Wrong';reject.dataset.help=`Reject ${word.text} for this position, for example when it does not fit the clue. Solving and word searches will not suggest it here again. The dictionary is unchanged.`;reject.onclick=()=>rejectWord(word,word.text);actionGroup.append(reject);}if(actionGroup.children.length)row.append(actionGroup);const details=word.analyses||word.evidence||word.details;if(Array.isArray(details)&&details.length){const evidence=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Word evidence';evidence.append(summary);for(const entry of details){const description=document.createElement('p');description.className='hint';description.textContent=[entry.lemma,entry.description||entry.analysis,entry.source].filter(Boolean).join(' · ');evidence.append(description);}row.append(evidence);}words.append(row);});}
+function jumpToSolvedWord(word){
+ const location=PuzzleState.solvedWordSelection(puzzle,word);if(!location)return;
+ selected=location.index;wordDirection=location.direction;lastClickedCell=selected;numericEntry=null;
+ render();const cell=$('grid').children[selected];cell.scrollIntoView({block:'center',inline:'nearest'});cell.focus({preventScroll:true});
+}
+$('solved-word-filter').onchange=()=>{solvedWordFilter=$('solved-word-filter').value;renderResults();};
+$('solved-word-sort').onchange=()=>{solvedWordSort=$('solved-word-sort').value;renderResults();};
+function toggleBlack(){if(!editMode)return;const cell=puzzle.cells[selected];numericEntry=null;cell.clue=false;cell.black=!cell.black;delete cell.numberReview;if(cell.black){cell.number='';cell.letter='';cell.guess='';cell.mappingAnchor=false;}invalidate();render();}
+function currentSelectedWord(){const word=PuzzleState.cellWord(puzzle,selected,wordDirection,false,solutionIndex);if(word)wordDirection=word.direction;return word;}
+
+function accept(indices){
+ const current=solution(),snapshot=PuzzleState.confirmCells(puzzle,indices,solutionIndex);if(!snapshot)return;
+ clearCandidateResults();acceptanceHistory.push(snapshot);solutionIndex=Math.max(0,(puzzle.suggestions?.solutions||[]).indexOf(current));solveJob.cancel();revision++;render();validate();
+}
+function unconfirm(indices){
+ if(!editMode)indices=indices.filter(i=>!puzzle.cells[i].prefilled);
+ if(!PuzzleState.unconfirmCells(puzzle,indices))return;
+ for(const i of indices)if(!puzzle.cells[i].letter)puzzle.cells[i].prefilled=false;
+ clearCandidateResults();acceptanceHistory.clear();solveJob.cancel();revision++;$('solve-status').textContent='Letters unconfirmed. Existing alternatives remain provisional; solve again to explore the relaxed constraints.';render();validate();
+}
+$('cell-confirmed').onchange=()=>{if($('cell-confirmed').checked)accept([selected]);else unconfirm([selected]);};
+$('undo-acceptance').onclick=()=>{const snapshot=acceptanceHistory.pop();if(!PuzzleState.undoConfirmation(puzzle,snapshot))return;clearCandidateResults();solutionIndex=snapshot.solutionIndex;solveJob.cancel();revision++;$('solve-status').textContent='Last letter change undone. Earlier provisional alternatives restored.';render();validate();};
+
+function clearCandidateResults(clearSelection=false){candidateResult=null;candidateBusy=false;candidateRequest++;if(clearSelection)candidateKeys=new Set();$('candidate-status').textContent='';}
+function renderWordHighlights(choices=PuzzleState.wordChoices(puzzle,solutionIndex)){
+ const active=new Set(currentSelectedWord()?.cells||[]);
+ const cells=new Set(choices.filter(word=>candidateKeys.has(word.key)).flatMap(word=>word.cells));
+ [...$('grid').children].forEach((cell,i)=>{
+  const highlighted=cells.has(i)&&!puzzle.cells[i].black;
+  cell.classList.toggle('candidate-selected',highlighted);
+  cell.classList.toggle('word-focused',active.has(i));
+  cell.setAttribute('aria-selected',String(highlighted||active.has(i)||i===selected));
+ });
+}
+function candidateLabel(word){return `${word.direction} · row ${word.row}, column ${word.col}`;}
+function renderCandidatePanel(){
+ const choices=PuzzleState.wordChoices(puzzle,solutionIndex),keys=new Set(choices.map(word=>word.key));candidateKeys=new Set([...candidateKeys].filter(key=>keys.has(key)));
+ renderWordHighlights(choices);
+ const current=currentSelectedWord();
+ $('candidate-current-pattern').textContent=current?`${candidateLabel(current)} · ${current.pattern}`:'No word at this cell.';renderCurrentWordCheck(current);renderCurrentWordRejection(current);
+ $('add-current-word').disabled=!current||candidateKeys.has(current.key)||candidateKeys.size>=8;
+ $('add-current-word').textContent=current&&candidateKeys.has(current.key)?'Added':'Add to list';
+ const body=$('candidate-word-table');body.replaceChildren();
+ for(const word of choices.filter(word=>candidateKeys.has(word.key))){
+  const row=document.createElement('tr'),selection=document.createElement('td'),remove=document.createElement('button');remove.type='button';remove.className='icon-button';remove.textContent='×';remove.setAttribute('aria-label','Remove '+candidateLabel(word));remove.title='Remove '+candidateLabel(word);
+  remove.onclick=()=>{clearCandidateResults();candidateKeys.delete(word.key);renderCandidatePanel();renderInspector();};selection.append(remove);
+  const location=document.createElement('td'),focus=document.createElement('button');focus.type='button';focus.className='word-location';focus.textContent=candidateLabel(word);focus.onclick=()=>{selected=word.cells[0];numericEntry=null;wordDirection=word.direction;lastClickedCell=selected;render();$('grid').children[selected].focus({preventScroll:true});};location.append(focus);
+  const pattern=document.createElement('td');pattern.className='word-pattern';pattern.textContent=word.pattern;pattern.title=word.provisionalCount?`${word.provisionalCount} provisional letters used as search constraints only`:'Confirmed letters only';
+  row.append(selection,location,pattern);body.append(row);
+ }
+ $('candidate-empty').hidden=candidateKeys.size>0;$('candidate-word-table').closest('.candidate-table-scroll').hidden=!candidateKeys.size;$('candidate-selection-count').textContent=`${candidateKeys.size} selected`;
+ $('find-candidates').disabled=candidateBusy||!candidateKeys.size;$('find-candidates').textContent=candidateBusy?'Finding candidates…':'Find candidates';
+ $('morphology-settings').hidden=!PuzzleState.languagePresentation(puzzle).showMorphology;$('use-morphology').checked=puzzle.useMorphology!==false;$('use-morphology').disabled=puzzle.language!=='fi'||!puzzle.useDictionary;
+ const output=$('candidate-results');output.replaceChildren();if(!candidateResult)return;
+ const explanation=document.createElement('p');explanation.className='hint';explanation.textContent=PuzzleState.languagePresentation(puzzle).candidateExplanation;output.append(explanation);
+ for(const word of candidateResult.words||[]){const section=document.createElement('section');section.className='local-candidate-list';const heading=document.createElement('h3');const original=choices.find(choice=>choice.slotId===word.slotId);heading.textContent=original?candidateLabel(original):`Word ${word.slotId+1}`;const list=document.createElement('p');list.className='candidate-words';list.textContent=word.candidates?.length?word.candidates.map(text=>PuzzleState.candidateDisplay(text,word.candidatePlausibility?.[text])).join(' · '):'No local candidate found within this search.';section.append(heading,list);if(word.candidates?.length){const evidence=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Dictionary status, base words and pattern scores';evidence.append(summary);appendWordEvidence(evidence,word.candidates,word);section.append(evidence);}if(word.truncated){const note=document.createElement('p');note.className='hint';note.textContent='Candidate list limited by the search budget.';section.append(note);}output.append(section);}
+ if(candidateKeys.size>1){const section=document.createElement('section');section.className='candidate-combinations';const title=document.createElement('h3');title.textContent='Jointly compatible selected words';const note=document.createElement('p');note.className='hint';note.textContent='These combinations fit the selected group and current constraints. They are not complete-grid solutions.';section.append(title,note);const combinations=candidateResult.combinations||[];if(!combinations.length){const empty=document.createElement('p');empty.textContent='No compatible combination found in this bounded search. Local candidate lists above remain available.';section.append(empty);}else{const list=document.createElement('ol');for(const combination of combinations){const item=document.createElement('li');item.textContent=combination.words.map(word=>{const original=choices.find(choice=>choice.slotId===word.slotId);return `${original?candidateLabel(original):'Word '+(word.slotId+1)}: ${word.text}`;}).join(' / ');list.append(item);}section.append(list);}output.append(section);}
+ const diagnostics=document.createElement('p');diagnostics.className='hint';diagnostics.textContent=(candidateResult.diagnostics||[]).join(' · ');output.append(diagnostics);
+}
+// Fully filled selected words are checked automatically, so a solved grid
+// can be reviewed word by word. Results are cached per language and word.
+const wordChecks=PuzzleState.wordAssessmentQueue(api,()=>{renderResults();renderCurrentWordCheck(currentSelectedWord());});
+$('retry-word-checks').onclick=()=>{wordChecks.retryErrors();renderResults();renderCurrentWordCheck(currentSelectedWord());};
+function renderCurrentWordCheck(current){
+ const output=$('candidate-current-check'),full=PuzzleState.completeWordText(puzzle,current,solutionIndex);
+ if(!current){output.hidden=true;output.textContent='';return;}
+ output.hidden=false;
+ if(!full){output.textContent='Incomplete word. Fill every letter to check its dictionary status and pattern.';return;}
+ if(full.partial){output.textContent='Open word fragment. Use Find candidates to match it against longer listed words.';return;}
+ const assessment=wordChecks.ensure(puzzle,{text:full.text,unknownCount:0});
+ output.textContent=assessment.status==='ready'?PuzzleState.selectedWordCheckText(assessment.result,full):assessment.status==='error'?`Word check failed: ${assessment.error}. Use Retry word checks in Explore possibilities.`:`Checking ${full.text}…`;
+}
+// Each word: dictionary status and pattern score, then any base-word analyses.
+function appendWordEvidence(container,texts,data){for(const text of texts){const row=document.createElement('div');row.className='candidate-evidence lookup-item';const title=document.createElement('strong');title.textContent=text;const status=document.createElement('p');status.className='hint';status.textContent=PuzzleState.candidateEvidenceText(data.candidateEvidence?.[text],data.candidatePlausibility?.[text],puzzle.language);row.append(title,status);for(const entry of data.candidateDetails?.[text]||[]){if(entry.analysis==='Listed surface form')continue;const description=document.createElement('p');description.className='hint';description.textContent=[entry.lemma,entry.description||entry.analysis,entry.source].filter(Boolean).join(' · ');row.append(description);}container.append(row);}}
+let lookupRequest=0;
+function clearLookup(){lookupRequest++;$('lookup-run').disabled=false;$('lookup-status').textContent='';$('lookup-results').replaceChildren();}
+$('lookup-clear').onclick=()=>{clearLookup();$('lookup-query').value='';$('lookup-query').focus();};
+function renderLookup(result){const output=$('lookup-results');output.replaceChildren();output.className='lookup-results';
+ if(result.kind==='word'){const row=document.createElement('div');row.className='lookup-item';const title=document.createElement('strong');title.textContent=result.word;const status=document.createElement('p');status.className='hint';status.textContent=PuzzleState.wordLookupText(result);row.append(title,status);for(const entry of result.analyses||[]){const description=document.createElement('p');description.className='hint';description.textContent=[entry.lemma,entry.description||entry.analysis,entry.source].filter(Boolean).join(' · ');row.append(description);}output.append(row);}
+ else appendWordEvidence(output,result.candidates||[],result);
+ const diagnostics=document.createElement('p');diagnostics.className='hint';diagnostics.textContent=(result.diagnostics||[]).join(' · ');output.append(diagnostics);}
+$('lookup-current').onclick=()=>{const word=currentSelectedWord();if(!word)return notify('Select a word in the grid first.');clearLookup();$('lookup-query').value=PuzzleState.lookupPattern(puzzle,word.cells);$('lookup-query').focus();};
+$('lookup-query').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();$('lookup-run').click();}};
+$('lookup-run').onclick=protect(async()=>{const query=$('lookup-query').value.trim();if(!query)return notify('Type a word or a pattern such as A 12 12 K 5.');
+ const token=++lookupRequest,version=revision;$('lookup-run').disabled=true;$('lookup-status').textContent='Looking up…';$('lookup-results').replaceChildren();
+ try{const result=await api('/api/lookup',{puzzle,query,useMappings:$('lookup-mappings').checked});if(token!==lookupRequest)return;if(version!==revision){$('lookup-status').textContent='The puzzle changed during lookup. Look up again.';return;}
+  $('lookup-status').textContent=result.kind==='word'?'Word checked.':`${result.candidates.length} matching ${result.candidates.length===1?'word':'words'} for ${result.pattern}${result.truncated?' (list limited by the search budget)':''}.`;renderLookup(result);}
+ catch(error){if(token===lookupRequest){$('lookup-status').textContent='Lookup failed: '+error.message;throw error;}}
+ finally{if(token===lookupRequest)$('lookup-run').disabled=false;}});
+$('use-morphology').onchange=()=>{puzzle.useMorphology=$('use-morphology').checked;invalidate();render();};
+$('add-current-word').onclick=()=>{const word=currentSelectedWord();if(!word||candidateKeys.has(word.key)||candidateKeys.size>=8)return;clearCandidateResults();candidateKeys.add(word.key);renderCandidatePanel();};
+$('clear-candidate-selection').onclick=()=>{clearCandidateResults(true);renderCandidatePanel();renderInspector();};
+$('find-candidates').onclick=protect(async()=>{
+ const slotIds=PuzzleState.candidateSelection(PuzzleState.wordChoices(puzzle,solutionIndex),candidateKeys);if(!slotIds.length||candidateBusy)return;
+ const version=revision,token=++candidateRequest;candidateBusy=true;candidateResult=null;renderCandidatePanel();$('candidate-status').textContent=`Finding candidates for ${slotIds.length} selected word${slotIds.length===1?'':'s'}…`;
+ try{const result=await api('/api/candidates',{puzzle:PuzzleState.candidateSearchPuzzle(puzzle,slotIds,solutionIndex),slotIds});if(token!==candidateRequest)return;if(version!==revision){$('candidate-status').textContent='The puzzle changed during search. Find candidates again for current constraints.';return;}candidateResult=result;const count=(result.words||[]).reduce((sum,word)=>sum+(word.candidates?.length||0),0);$('candidate-status').textContent=`Selected-word search ${result.status==='budget_exhausted'?'reached its limit':'complete'}: ${count} local candidates. These are not complete-grid solutions.`;}
+ catch(error){if(token===candidateRequest){$('candidate-status').textContent='Candidate search failed: '+error.message;throw error;}}
+ finally{if(token===candidateRequest){candidateBusy=false;renderCandidatePanel();}}
+});
+
+function updateView(){
+ const stage=$('board-stage'),viewport=$('board-viewport'),image=$('puzzle-image');
+ const bounds=puzzle.imageBounds||{width:1};
+ const baseWidth=puzzle.image?puzzle.cols*46/bounds.width:puzzle.cols*47+3;
+ const ratio=puzzle.image?(image.naturalWidth?image.naturalHeight/image.naturalWidth:1):(puzzle.rows*47+3)/baseWidth;
+ const availableWidth=Math.max(1,viewport.clientWidth-22),availableHeight=Math.max(120,Math.min(window.innerHeight*.78-42,window.innerHeight-Math.max(0,viewport.getBoundingClientRect().top)-60));
+ if(fitMode)viewScale=PuzzleState.fitScale(baseWidth,baseWidth*ratio,availableWidth,availableHeight,fitMode);
+ if(puzzle.image){stage.style.width=baseWidth*viewScale+'px';stage.style.setProperty('--image-letter-size',Math.max(6,23*viewScale)+'px');stage.style.setProperty('--image-number-size',Math.max(4,10*viewScale)+'px');}
+ else{stage.style.width='';stage.style.setProperty('--cell',46*viewScale+'px');stage.style.setProperty('--view-scale',viewScale);}
+ $('zoom-level').textContent=Math.round(viewScale*100)+'%';$('zoom-range').value=Math.round(viewScale*100);for(const mode of ['puzzle','height','width'])$('fit-'+mode).setAttribute('aria-pressed',String(fitMode===mode));
+}
+function zoomTo(scale){fitMode=null;viewScale=Math.max(.05,Math.min(3,scale));updateView();}
+$('zoom-in').onclick=()=>zoomTo(viewScale*1.25);$('zoom-out').onclick=()=>zoomTo(viewScale/1.25);
+$('zoom-range').oninput=()=>zoomTo(Number($('zoom-range').value)/100);
+for(const mode of ['puzzle','height','width'])$('fit-'+mode).onclick=()=>{fitMode=mode;updateView();$('board-viewport').scrollTop=0;$('board-viewport').scrollLeft=0;};
+$('puzzle-image').onload=()=>updateView();window.addEventListener('resize',()=>updateView());
+let viewFrame=0;window.addEventListener('scroll',()=>{if(!fitMode||viewFrame)return;viewFrame=requestAnimationFrame(()=>{viewFrame=0;updateView();});},{passive:true});
+
+let pendingLetterConflict=null;
+$('letter-conflict-keep').onclick=()=>$('letter-conflict-dialog').close();
+$('letter-conflict-dialog').addEventListener('close',()=>{pendingLetterConflict=null;renderInspector();});
+$('letter-conflict-move').onclick=()=>{
+ const pending=pendingLetterConflict;
+ if(!pending||pending.puzzle!==puzzle||pending.revision!==revision||pending.editMode!==editMode){$('letter-conflict-dialog').close();return;}
+ PuzzleState.moveLetterAssignment(puzzle,pending.index,pending.letter,solutionIndex);
+ puzzle.cells[pending.index].prefilled=editMode;
+ $('letter-conflict-dialog').close();invalidate();render();
+};
+function editLetter(letter){
+ if(!editMode&&puzzle.cells[selected].prefilled)return;
+ const owners=PuzzleState.letterOwners(puzzle,selected,letter,solutionIndex);
+ if(owners.length){
+  if(pendingLetterConflict)return;
+  const locked=!editMode&&puzzle.cells.some(c=>owners.includes(c.number)&&c.prefilled&&c.letter===letter);
+  pendingLetterConflict={puzzle,revision,editMode,index:selected,letter};
+  $('letter-conflict-message').textContent=`${letter} is already assigned to number${owners.length>1?'s':''} ${owners.join(', ')}. Keep that assignment, or remove it and assign ${letter} to number ${puzzle.cells[selected].number}.`+(locked?' This is a prefilled letter. Switch to Edit mode to move it.':'');
+  $('letter-conflict-move').disabled=locked;$('letter-conflict-dialog').showModal();return;
+ }
+ PuzzleState.editConfirmedLetter(puzzle,selected,letter,solutionIndex);
+ puzzle.cells[selected].prefilled=editMode&&!!letter;
+ invalidate();
+ if(puzzle.cells.some(cell=>!cell.black&&!cell.letter&&cell.guess))$('solve-status').textContent='Letter updated. Remaining compatible letters are kept as provisional notes. Solve again to refresh alternatives.';
+}
+function gridKey(event){
+ if(event.ctrlKey||event.metaKey||event.altKey)return;
+ const moves={ArrowLeft:-1,ArrowRight:1,ArrowUp:-puzzle.cols,ArrowDown:puzzle.cols},cell=puzzle.cells[selected];
+ if(event.key in moves){event.preventDefault();numericEntry=null;lastClickedCell=null;wordDirection='Across';selected=Math.min(puzzle.cells.length-1,Math.max(0,selected+moves[event.key]));}
+ else if(!editMode){
+  if(event.key.length===1||['Backspace','Delete'].includes(event.key))event.preventDefault();
+  if(cell.black||cell.prefilled)return;
+  if(['Backspace','Delete'].includes(event.key))editLetter('');
+  else if(new RegExp(PuzzleState.nordicLetters(puzzle.language)?'^[a-zåäö]$':'^[a-z]$','i').test(event.key))editLetter(normalize(event.key));
+  else return;
+ }
+ else if(event.key===' '){event.preventDefault();toggleBlack();}
+ else if(!cell.black&&(/^[0-9]$/.test(event.key)||event.key==='Backspace')){
+  event.preventDefault();const next=PuzzleState.numberEntry(numericEntry,selected,event.key,Date.now());
+  if(next){numericEntry=next;cell.number=next.digits;cell.mappingAnchor=false;delete cell.numberReview;invalidate();}else if(event.key==='Backspace'){numericEntry=null;editLetter('');}
+ }else if(!cell.black&&event.key==='Delete'){event.preventDefault();numericEntry=null;editLetter('');}
+ else if(!cell.black&&new RegExp(PuzzleState.nordicLetters(puzzle.language)?'^[a-zåäö]$':'^[a-z]$','i').test(event.key)){event.preventDefault();numericEntry=null;editLetter(normalize(event.key));}
+ else return;
+ render();if(!pendingLetterConflict)$('grid').children[selected].focus();
+}
+
+$('number-position').onchange=()=>{puzzle.numberPosition=$('number-position').value;$('grid').dataset.numberPosition=puzzle.numberPosition;};
+$('name').oninput=()=>{puzzle.name=$('name').value;};$('new').onclick=async()=>{const rows=Number($('rows').value),cols=Number($('cols').value);if(!Number.isInteger(rows)||!Number.isInteger(cols)||rows<1||cols<1||rows>40||cols>40)return notify('Use whole-number dimensions between 1 and 40.',true);if((puzzle.image||puzzle.cells.some(c=>c.black||c.number||c.letter||c.guess))&&!await confirmAction('Create a new grid? Export or save first to keep this puzzle.'))return;setPuzzle(fresh(rows,cols,$('language').value));};
+$('language').onchange=()=>{dictionaryEditor.cancel();$('dictionary-dialog').close();puzzle.language=$('language').value;invalidate();render();};$('use-dictionary').onchange=()=>{puzzle.useDictionary=$('use-dictionary').checked;invalidate();render();};
+function updateRules(event){
+ const capacityChanged=event?.target===$('capacity');
+ const capacity=capacityChanged?Number($('capacity').value):puzzle.rules.maxLettersPerNumber;
+ if(capacityChanged&&(!Number.isInteger(capacity)||capacity<1||capacity>9)){$('capacity').value=puzzle.rules.maxLettersPerNumber;notify('Letters per number must be a whole number from 1 to 9.',true);return;}
+ if(capacity!==1)for(const cell of puzzle.cells)cell.mappingAnchor=false;
+ puzzle.rules={...puzzle.rules,maxLettersPerNumber:capacity,forbiddenPatterns:$('forbidden').value.split(/[\n,]+/).map(s=>normalize(s.trim())).filter(Boolean),discouragedPatterns:$('discouraged').value.split(/[\n,]+/).map(s=>normalize(s.trim())).filter(Boolean)};
+ invalidate();render();
+}
+for(const id of ['capacity','forbidden','discouraged'])$(id).onchange=updateRules;
+$('edit-tool').onclick=()=>setEditMode(true);$('puzzle-tool').onclick=()=>setEditMode(false);
+function setEditMode(value){editMode=value;numericEntry=null;acceptanceHistory.clear();render();}
+function renderEditMode(){
+ $('edit-tool').classList.toggle('active',editMode);$('puzzle-tool').classList.toggle('active',!editMode);
+ $('edit-tool').setAttribute('aria-pressed',String(editMode));$('puzzle-tool').setAttribute('aria-pressed',String(!editMode));
+ for(const id of ['cell-black','cell-clue','cell-number',...Object.keys(flags),'rows','cols','apply-image-dimensions','apply-alignment','ocr','remove-image','straighten-photo','bound-x','bound-y','bound-width','bound-height']){
+  if(!editMode)$(id).disabled=true;
+  else if(!['cell-number','cell-letter',...Object.keys(flags)].includes(id))$(id).disabled=id==='ocr'&&!ocrAvailable;
+ }
+}
+
+$('cell-clue').onchange=()=>{numericEntry=null;const c=puzzle.cells[selected];c.clue=$('cell-clue').checked;c.black=c.clue;c.number='';c.letter='';c.guess='';c.mappingAnchor=false;invalidate();render();};$('cell-black').onchange=toggleBlack;$('cell-number').onchange=()=>{const number=$('cell-number').value.trim();if(number&&!/^[1-9][0-9]{0,2}$/.test(number)){notify('A number must be a positive integer from 1 to 999.',true);return renderInspector();}puzzle.cells[selected].number=number;puzzle.cells[selected].mappingAnchor=false;delete puzzle.cells[selected].numberReview;invalidate();render();};$('cell-letter').onchange=()=>{const letter=normalize($('cell-letter').value.trim());if(letter&&!new RegExp(PuzzleState.nordicLetters(puzzle.language)?'^[A-ZÅÄÖ]$':'^[A-Z]$').test(letter)){notify('Enter exactly one letter from the selected language alphabet.',true);return renderInspector();}editLetter(letter);render();};for(const[id,key]of Object.entries(flags))$(id).onchange=()=>{puzzle.cells[selected][key]=$(id).checked;invalidate();render();};$('accept-all').onclick=()=>accept(puzzle.cells.map((_,i)=>i));$('accept-deductions').onclick=()=>{const candidates=puzzle.cells.map((_,i)=>i).filter(i=>puzzle.suggestions?.forcedLetters?.[i]);accept(candidates);};$('alternatives').onchange=()=>{clearCandidateResults();solutionIndex=Number($('alternatives').value);render();};
+const solveJob=PuzzleState.solveRunner({
+ request:api,
+ onBusy:busy=>{for(const id of ['solve','solve-grid']){$(id).disabled=busy;$(id).textContent=busy?'Finding possibilities…':'Solve puzzle →';}$('cancel-solve').hidden=!busy;$('cancel-solve').disabled=false;$('cancel-solve').textContent='Cancel search';},
+ onStopping:stopping=>{$('cancel-solve').disabled=stopping;$('cancel-solve').textContent=stopping?'Stopping…':'Cancel search';if(stopping)$('solve-status').textContent='Stopping search and keeping its best provisional result…';},
+ onUpdate:(state,stopping)=>{
+  if(state.status==='running'||state.status==='queued'){const p=state.progress||{};$('solve-status').textContent=`${stopping?'Stopping search':String(p.stage||'Preparing search').replaceAll('_',' ')} · ${Number(p.nodes||0).toLocaleString()} search nodes · ${Number(p.elapsedSeconds||0).toFixed(1)} seconds · ${Number(p.solutionsFound||0)} suggestions found`;return;}
+  if(state.status==='failed'){$('solve-status').textContent='Search failed: '+(state.error||'Unknown error');notify($('solve-status').textContent,true);return;}
+  const result=state.result;
+  if(state.status==='cancelled'&&(!result||PuzzleState.cancelledResult(puzzle,result)!==result)){
+   $('solve-status').textContent=PuzzleState.solveStopExplanation('cancelled',result?.stats)+(PuzzleState.hasSolveProgress(puzzle,puzzle.suggestions)?' Previously displayed suggestions remain provisional.':' No provisional progress was found.');notify($('solve-status').textContent);return;
+  }
+  if(!result)throw new Error('The completed search returned no result.');
+  clearCandidateResults();puzzle.suggestions=result;solutionIndex=0;render();
+  const count=result.solutions?.length||0,forced=(result.forcedLetters||[]).filter((letter,i)=>letter&&!puzzle.cells[i]?.letter&&!puzzle.cells[i]?.black).length;
+  $('solve-status').textContent=PuzzleState.solveSummary(result.status,count,forced,result.stats)+(!count&&result.partialLetters?.some((letter,i)=>letter&&!puzzle.cells[i].letter)?' A partial, unverified hypothesis is displayed on the grid.':'');notify($('solve-status').textContent);
+ },
+ onError:error=>{$('solve-status').textContent='Search failed: '+error.message;notify($('solve-status').textContent,true);},
+ onCancelError:error=>notify('Could not confirm server cancellation: '+error.message+'. The search remains bounded by its time limit.',true)
+});
+$('solve').onclick=()=>{acceptanceHistory.clear();$('undo-acceptance').disabled=true;clearCandidateResults();renderCandidatePanel();$('solve-status').textContent='Starting local search…';void solveJob.start(JSON.parse(JSON.stringify(puzzle)));};
+$('solve-grid').onclick=()=>$('solve').click();
+$('cancel-solve').onclick=()=>solveJob.requestCancel();
+$('search-mode').onchange=()=>{puzzle.searchMode=$('search-mode').value;invalidate();render();};
+$('allow-unknown-words').onchange=()=>{puzzle.allowUnknownWords=$('allow-unknown-words').checked;invalidate();render();};
+
+$('save').onclick=protect(async()=>{if(storageBusy)return;const version=revision,savedPuzzle=puzzle,savedName=puzzle.name,sent=workspaceFingerprint();setStorageBusy(true);try{const result=await api('/api/puzzles',savedPuzzle);if(puzzle===savedPuzzle){const unchanged=workspaceFingerprint()===sent;puzzle.id=result.id;if(unchanged)savedFingerprint=workspaceFingerprint();}notify(`Saved “${result.name}” locally.`+(puzzle===savedPuzzle&&(version!==revision||puzzle.name!==savedName)?' Newer edits are not saved yet.':''));}finally{setStorageBusy(false);}});$('load').onclick=protect(async()=>{if(storageBusy)return;await refreshSaved();if(!$('load-dialog').open)$('load-dialog').showModal();});
+let renameItem=null;
+let storageBusy=false;
+function setStorageBusy(value){storageBusy=value;$('save').disabled=value;$('load').disabled=value;$('rename-save').disabled=value;for(const button of $('saved-list').querySelectorAll('button'))button.disabled=value;}
+
+async function refreshSaved(){
+ const token=++loadToken,result=await api('/api/puzzles');if(token!==loadToken)return;
+ const list=$('saved-list');list.replaceChildren();if(!result.puzzles.length)list.textContent='No saved puzzles yet.';
+ result.puzzles.forEach(item=>{
+  const row=document.createElement('div');row.className='saved-row';
+  const button=document.createElement('button');button.className='saved-item';
+  const name=document.createElement('span');name.textContent=item.name;
+  const date=document.createElement('small');date.textContent=new Date(item.updatedAt).toLocaleDateString();button.append(name,date);
+  button.onclick=protect(async()=>{if(storageBusy)return;if(!await confirmAction('Open this saved puzzle? Unsaved changes in the current puzzle will be replaced.'))return;const token=++loadToken,version=revision;const restored=await restorePuzzle(await api('/api/puzzles/'+encodeURIComponent(item.id)));if(token!==loadToken||version!==revision)return notify('The workspace changed while opening. Open the saved puzzle again.');setPuzzle(restored,false);$('load-dialog').close();notify('Puzzle opened.');});
+  const rename=document.createElement('button');rename.className='icon-button';rename.textContent='✎';rename.title='Rename '+item.name;rename.setAttribute('aria-label',rename.title);
+  rename.onclick=()=>{if(storageBusy)return;renameItem=item;$('rename-name').value=item.name;$('rename-dialog').showModal();$('rename-name').select();};
+  const remove=document.createElement('button');remove.className='icon-button';remove.title='Delete '+item.name;remove.setAttribute('aria-label',remove.title);
+  remove.innerHTML='<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></svg>';
+  remove.onclick=protect(async()=>{if(storageBusy)return;if(!await confirmAction(`Delete “${item.name}” from saved puzzles? A local recovery copy will be kept.`,'Delete saved puzzle?'))return;if(storageBusy)return;setStorageBusy(true);try{await api('/api/puzzles/'+encodeURIComponent(item.id),null,'DELETE');if(puzzle.id===item.id)delete puzzle.id;await refreshSaved();notify('Saved puzzle deleted.');}finally{setStorageBusy(false);}});
+  row.append(button,rename,remove);for(const control of [button,rename,remove])control.disabled=storageBusy;list.append(row);
+ });
+}
+$('rename-form').onsubmit=protect(async event=>{event.preventDefault();if(storageBusy)return;const item=renameItem,name=$('rename-name').value.trim();if(!name)return;const oldName=puzzle.name,currentPuzzle=puzzle;setStorageBusy(true);try{const result=await api('/api/puzzles/'+encodeURIComponent(item.id),{name},'PATCH');if(puzzle===currentPuzzle&&puzzle.id===item.id&&puzzle.name===oldName&&oldName===item.name){puzzle.name=result.name;$('name').value=result.name;}$('rename-dialog').close();await refreshSaved();notify('Saved puzzle renamed.');}finally{setStorageBusy(false);}});
+
+$('export').onclick=()=>{savedFingerprint=workspaceFingerprint();const blob=new Blob([JSON.stringify(puzzle,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=(puzzle.name||'puzzle').replace(/[^a-z0-9_-]/gi,'_')+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+async function restorePuzzle(value){
+ const restored=PuzzleState.canonicalPuzzle(value),saved=restored.suggestions;
+ delete restored.suggestions;
+ if(!saved)return restored;
+ const savedSolutions=Array.isArray(saved.solutions)?saved.solutions:[];
+ // Disabled entries do not count as dictionary evidence.
+ const savedDictionary=restored.useDictionary?await api('/api/dictionaries/'+restored.language):null,disabledWords=new Set(savedDictionary?.disabled||[]),dictionary=savedDictionary?savedDictionary.words.filter(word=>!disabledWords.has(word)):[];
+ const slots=PuzzleState.slots(restored),solutions=[];
+ const baseCheck=await api('/api/validate',restored),forcedLetters=baseCheck.valid?PuzzleState.mappingDeductions(restored):restored.cells.map(()=> '');
+ for(const candidate of savedSolutions.slice(0,20)){
+  const letters=PuzzleState.candidateLetters(restored,candidate);
+  if(!letters)continue;
+  const filled={...restored,cells:restored.cells.map((cell,i)=>({...cell,letter:letters[i]}))};
+  const check=await api('/api/validate',filled);
+  if(!check.valid)continue;
+  const words=PuzzleState.restoredWords(restored,letters,dictionary);
+  solutions.push({letters,words,score:Number.isFinite(candidate.score)?candidate.score:0});
+ }
+ let partialLetters;
+ if(Array.isArray(saved.partialLetters)&&saved.partialLetters.length===restored.cells.length){
+  const alphabet=PuzzleState.nordicLetters(restored.language)?/^[A-ZÅÄÖ]?$/:/^[A-Z]?$/;
+  const letters=saved.partialLetters.map(letter=>typeof letter==='string'?normalize(letter.trim()):'?');
+  if(letters.every((letter,i)=>alphabet.test(letter)&&(!restored.cells[i].black||!letter)&&(!restored.cells[i].letter||!letter||restored.cells[i].letter===letter))){
+   const check=await api('/api/validate',{...restored,cells:restored.cells.map((cell,i)=>({...cell,letter:cell.letter||letters[i]}))});
+   if(check.valid)partialLetters=letters;
+  }
+ }
+ restored.suggestions={status:'restored_suggestions',solutions,forcedLetters,partialLetters,stats:{exhaustive:false},diagnostics:['Saved alternatives checked against current constraints'+(restored.useDictionary?'. Current dictionary matches were rechecked; all other words, including saved morphology matches, remain unverified.':'. Language-model candidates remain unverified.')+(solutions.length<savedSolutions.length?' Some saved alternatives were invalid and discarded.':'')]};
+ return restored;
+}
+$('import').onchange=protect(async event=>{const file=event.target.files[0];event.target.value='';if(!file)return;const version=revision;if(file.size>15*1024*1024)throw new Error('Puzzle file is too large (maximum 15 MB).');const value=JSON.parse(await file.text());await api('/api/validate',value);if(!value||!Array.isArray(value.cells)||!value.rules)throw new Error('Invalid puzzle file.');if(!await confirmAction('Import this puzzle and replace the current unsaved workspace?'))return;delete value.id;const restored=await restorePuzzle(value);if(version!==revision)return notify('The workspace changed during import. Import the puzzle again.');setPuzzle(restored,false);notify('Puzzle imported. Saved suggestions were checked against current constraints. Words absent from the current dictionary remain unverified.');});
+function fileData(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Could not read the file.'));reader.readAsDataURL(file);});}
+function choosePdfPage(pages){
+ return new Promise(resolve=>{
+  const dialog=$('pdf-dialog');$('pdf-page-count').textContent=`This PDF contains ${pages} pages.`;$('pdf-page').max=pages;$('pdf-page').value=1;
+  let chosen=null;
+  $('pdf-page-form').onsubmit=event=>{event.preventDefault();const page=Number($('pdf-page').value);if(Number.isInteger(page)&&page>=1&&page<=pages){chosen=page;dialog.close();}};
+  $('pdf-cancel').onclick=()=>dialog.close();dialog.onclose=()=>resolve(chosen);dialog.showModal();
+ });
+}
+let imageToken=0,straightenHandles=null,straightenBusy=false;
+$('image-upload').onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();$('image').click();}};
+$('image').onchange=protect(async event=>{
+ const file=event.target.files[0];event.target.value='';if(!file)return;const version=revision,token=++imageToken;
+ const isPdf=file.type==='application/pdf'||/\.pdf$/i.test(file.name);
+ if(!isPdf&&!['image/png','image/jpeg','image/webp'].includes(file.type))throw new Error('Choose a PDF, PNG, JPEG, or WebP file.');
+ if(file.size>8*1024*1024)throw new Error('File is too large (maximum 8 MB).');
+ let data=await fileData(file);
+ if(isPdf){
+  data='data:application/pdf;base64,'+data.split(',')[1];
+  notify('Reading PDF locally…');const info=await api('/api/pdf',{pdf:data});
+  if(token!==imageToken||version!==revision)return;
+  const page=info.pages===1?1:await choosePdfPage(info.pages);if(page===null){notify('PDF import cancelled.');return;}
+  if(token!==imageToken||version!==revision)return;
+  notify(`Rendering PDF page ${page} locally…`);const rendered=await api('/api/pdf',{pdf:data,page});data=rendered.image;
+ }
+ const decoded=new Image();decoded.src=data;
+ try{await decoded.decode();}catch{throw new Error('The file is not a readable image. The current image was kept.');}
+ if(!decoded.naturalWidth||!decoded.naturalHeight||decoded.naturalWidth*decoded.naturalHeight>16000000)throw new Error('Images must contain at most 16 million pixels.');
+ if(token!==imageToken||version!==revision)return notify('The workspace changed while loading the image. Add it again.');
+ if((puzzle.image||puzzle.cells.some(c=>c.black||c.number||c.letter||c.guess))&&!await confirmAction('Import this screenshot as a fresh grid? Save first to keep the current puzzle.'))return;
+ if(token!==imageToken)return;
+ const next=fresh(puzzle.rows,puzzle.cols,puzzle.language);Object.assign(next,{name:puzzle.name,rules:puzzle.rules,useDictionary:puzzle.useDictionary,image:data,imageBounds:{x:0,y:0,width:1,height:1}});
+ setPuzzle(next);const importedPuzzle=puzzle,recognitionVersion=revision;$('ocr').disabled=true;
+ notify('Image loaded. Detecting grid dimensions, blocked cells, and numbers locally…');
+ try{
+  const result=await api('/api/ocr',{image:data,autoDetect:true});
+  if(token!==imageToken||puzzle!==importedPuzzle||revision!==recognitionVersion)return notify('The workspace changed during recognition. The latest edits were kept; recognize again when ready.');
+  puzzle.rows=result.rows;puzzle.cols=result.cols;puzzle.cells=result.cells.map(c=>({...c,prefilled:!!c.letter}));puzzle.imageBounds=result.bounds||result.imageBounds||puzzle.imageBounds;
+  invalidate();syncControls();render();notify(['Image imported. Review recognized cells before solving.',...(result.diagnostics||[])].join(' '));
+ }catch(error){if(puzzle===importedPuzzle)notify('Image kept. Automatic recognition failed: '+error.message+' For a photo taken at an angle or of a curved page, use Straighten photo. Otherwise set rows, columns and image bounds, then apply dimensions and recognize again.',true);}
+ finally{if(token===imageToken)$('ocr').disabled=false;}
+});
+$('apply-image-dimensions').onclick=async()=>{const rows=Number($('rows').value),cols=Number($('cols').value);if(!Number.isInteger(rows)||!Number.isInteger(cols)||rows<1||rows>40||cols<1||cols>40)return notify('Use whole-number dimensions between 1 and 40.',true);if(puzzle.cells.some(c=>c.number||c.letter||c.guess||c.black)&&!await confirmAction('Apply these dimensions and clear grid entries? The image and alignment will be kept.'))return;puzzle.rows=rows;puzzle.cols=cols;puzzle.cells=fresh(rows,cols).cells;selected=0;numericEntry=null;invalidate();render();};
+
+for(const key of ['x','y','width','height'])$('bound-'+key).oninput=()=>{alignmentDirty=true;solveJob.cancel();revision++;$('alignment-status').textContent='Alignment changes are not applied yet.';};
+$('apply-alignment').onclick=()=>{
+ const values={};for(const key of ['x','y','width','height'])values[key]=$('bound-'+key).value;
+ try{const bounds=PuzzleState.imageBoundsFromPercent(values);puzzle.imageBounds=bounds;alignmentDirty=false;solveJob.cancel();revision++;renderGrid();$('alignment-status').textContent='Alignment applied.';}
+ catch(error){$('alignment-status').textContent=error.message;}
+};
+$('opacity').oninput=()=>document.documentElement.style.setProperty('--overlay',$('opacity').value/100);$('remove-image').onclick=()=>{delete puzzle.image;delete puzzle.imageBounds;delete puzzle.straightenedPhoto;solveJob.cancel();revision++;render();};$('ocr').onclick=protect(async()=>{if(alignmentDirty)throw new Error('Apply the alignment changes before recognizing the grid.');if(!ocrAvailable)throw new Error('Local OCR is unavailable. You can still enter cells manually over the image.');if(puzzle.cells.some(c=>c.number||c.letter||c.guess||c.black)&&!await confirmAction('Recognition replaces the current grid entries. Continue?'))return;const version=revision;$('ocr').disabled=true;try{const result=await api('/api/ocr',{image:puzzle.image,rows:puzzle.rows,cols:puzzle.cols,bounds:puzzle.imageBounds,photo:!!puzzle.straightenedPhoto});if(version!==revision)return notify('The puzzle changed during recognition. Run recognition again.');puzzle.cells=result.cells.map(c=>({...c,prefilled:!!c.letter}));invalidate();render();notify(['Recognition complete. Review all cells before solving.',...result.diagnostics].join(' '));}finally{$('ocr').disabled=false;}});
+let dictionaryPages=PuzzleState.dictionaryPages(),dictionaryPage=0,dictionaryBusy=false;
+function renderDictionaryPage(){
+ $('dictionary-words').value=dictionaryPages.page(dictionaryPage);
+ $('dictionary-page-status').textContent=`Page ${dictionaryPage+1} of ${dictionaryPages.count}`;
+ $('dictionary-previous').disabled=dictionaryBusy||dictionaryPage===0;
+ $('dictionary-next').disabled=dictionaryBusy||dictionaryPage===dictionaryPages.count-1;
+}
+function loadDictionaryText(text){dictionaryPages=PuzzleState.dictionaryPages(text);dictionaryPage=0;renderDictionaryPage();}
+$('dictionary-previous').onclick=()=>{dictionaryPage--;renderDictionaryPage();};
+$('dictionary-next').onclick=()=>{dictionaryPage++;renderDictionaryPage();};
+const dictionaryEditor=PuzzleState.dictionaryEditor(api,data=>{
+ dictionaryLanguage=data.language;
+ $('dictionary-title').textContent=PuzzleState.languagePresentation({language:dictionaryLanguage}).name+' dictionary';
+ $('dictionary-source').textContent=`${data.source} · ${data.words.length} entries. Bundled demonstration lists are not comprehensive.`;
+ loadDictionaryText(data.words.join('\n'));bulkLoaded=true;bulkDirty=false;if(!$('dictionary-dialog').open)$('dictionary-dialog').showModal();
+},result=>{
+ $('dictionary-dialog').close();
+ notify(`Saved ${result.count} ${PuzzleState.languagePresentation({language:result.language}).name} dictionary entries.`+(result.importing?` Skipped ${result.skipped} invalid lines; removed ${result.duplicates} duplicates.`:''));
+},result=>{wordChecks.clear(result.language);if(puzzle.language===result.language){invalidate();render();}},busy=>{
+ for(const id of ['dictionary','save-dictionary','dictionary-file'])$(id).disabled=busy;
+ $('dictionary-words').readOnly=busy;dictionaryBusy=busy;renderDictionaryPage();
+});
+$('dictionary-dialog').addEventListener('close',()=>{dictionaryEditor.cancel();dictionarySearchToken++;});
+// Search-driven editing: the server filters and pages, so even an 870k-word
+// list never has to load into the browser. Bulk text loads only on demand.
+let dictionaryOffset=0,dictionarySearchToken=0,bulkLoaded=false,bulkDirty=false,lastDictionarySearch=null;
+async function searchDictionary(offset=0){const token=++dictionarySearchToken,language=dictionaryLanguage;const query=$('dictionary-query').value.trim(),status=$('dictionary-filter').value;
+ $('dictionary-search-status').textContent='Searching…';
+ try{const result=await api(`/api/dictionaries/${language}/search?q=${encodeURIComponent(query)}&status=${status}&offset=${offset}`);if(token!==dictionarySearchToken)return;lastDictionarySearch=result;dictionaryOffset=result.offset;renderDictionaryResults(result);}
+ catch(error){if(token===dictionarySearchToken)$('dictionary-search-status').textContent='Search failed: '+error.message;}}
+function renderDictionaryResults(result){const output=$('dictionary-results');output.replaceChildren();
+ $('dictionary-source').textContent=`${result.custom?'Custom local dictionary':'Bundled demonstration vocabulary (not comprehensive)'} · ${result.count.toLocaleString('en')} entries, ${result.disabledCount.toLocaleString('en')} disabled.`;
+ $('dictionary-search-status').textContent=PuzzleState.dictionarySearchSummary(result);
+ for(const entry of result.words){const row=document.createElement('div');row.className='dictionary-row'+(entry.enabled?'':' disabled');
+  const toggle=document.createElement('label');toggle.className='check';const box=document.createElement('input');box.type='checkbox';box.checked=entry.enabled;box.setAttribute('aria-label',(entry.enabled?'Disable ':'Enable ')+entry.word);box.title=entry.enabled?'Enabled: used for solving. Untick to disable.':'Disabled: kept but not used. Tick to enable.';
+  box.onchange=protect(()=>editDictionary(box.checked?{enable:[entry.word]}:{disable:[entry.word]},`${box.checked?'Enabled':'Disabled'} ${entry.word}.`));
+  const word=document.createElement('span');word.textContent=entry.word;toggle.append(box,word);
+  const remove=document.createElement('button');remove.type='button';remove.className='icon-button';remove.textContent='Delete';remove.setAttribute('aria-label','Delete '+entry.word);
+  remove.onclick=protect(async()=>{if(await confirmAction(`Delete ${entry.word} from the ${PuzzleState.languagePresentation({language:dictionaryLanguage}).name} dictionary? To keep it but stop using it, untick it instead.`,'Delete word?'))await editDictionary({remove:[entry.word]},`Deleted ${entry.word}.`);});
+  row.append(toggle,remove);output.append(row);}
+ $('dictionary-results-previous').disabled=result.offset===0;$('dictionary-results-next').disabled=result.offset+result.words.length>=result.total;
+ $('dictionary-results-page').textContent=result.total?`Page ${Math.floor(result.offset/result.limit)+1} of ${Math.ceil(result.total/result.limit)}`:'';}
+async function editDictionary(edits,message){const language=dictionaryLanguage;
+ if(bulkDirty&&!await confirmAction('The bulk editor has unsaved changes. Discard them and apply this change?','Discard bulk edits?')){if(lastDictionarySearch)renderDictionaryResults(lastDictionarySearch);return;}
+ const result=await api(`/api/dictionaries/${language}/entries`,edits);
+ notify(message+(result.skipped?` ${result.skipped} already in that state.`:''));
+ wordChecks.clear(language);if(puzzle.language===language){invalidate();render();}
+ if(bulkLoaded){bulkLoaded=false;bulkDirty=false;if($('dictionary-bulk').open)await dictionaryEditor.open(language);}
+ await searchDictionary(dictionaryOffset);}
+$('dictionary').onclick=protect(async()=>{dictionaryEditor.cancel();dictionaryLanguage=puzzle.language;bulkLoaded=false;bulkDirty=false;$('dictionary-bulk').open=false;
+ $('dictionary-title').textContent=PuzzleState.languagePresentation({language:dictionaryLanguage}).name+' dictionary';$('dictionary-source').textContent='';$('dictionary-results').replaceChildren();$('dictionary-query').value='';$('dictionary-filter').value='all';lastDictionarySearch=null;
+ $('dictionary-dialog').showModal();await searchDictionary(0);});
+$('dictionary-bulk').addEventListener('toggle',protect(async()=>{if($('dictionary-bulk').open&&!bulkLoaded)await dictionaryEditor.open(dictionaryLanguage);}));
+$('dictionary-search').onclick=()=>searchDictionary(0);
+$('dictionary-query').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();searchDictionary(0);}};
+// Emptying the box (typing or the clear button) shows the unfiltered list again.
+$('dictionary-query').oninput=()=>{if(!$('dictionary-query').value.trim()&&lastDictionarySearch?.query)searchDictionary(0);};
+$('dictionary-filter').onchange=()=>searchDictionary(0);
+$('dictionary-results-previous').onclick=()=>searchDictionary(Math.max(0,dictionaryOffset-(lastDictionarySearch?.limit||100)));
+$('dictionary-results-next').onclick=()=>searchDictionary(dictionaryOffset+(lastDictionarySearch?.limit||100));
+$('dictionary-add').onclick=protect(async()=>{const words=PuzzleState.dictionaryInputWords($('dictionary-add-words').value);if(!words.length)return notify('Type one or more words to add.');
+ await editDictionary({add:words},`Added ${words.length===1?words[0]:words.length+' words'}.`);$('dictionary-add-words').value='';});
+$('dictionary-add-words').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();$('dictionary-add').click();}};
+$('dictionary-words').oninput=()=>{dictionaryPages.update(dictionaryPage,$('dictionary-words').value);dictionaryEditor.manualEdit();bulkDirty=true;};
+$('dictionary-file').onchange=protect(async event=>{
+ const file=event.target.files[0];event.target.value='';if(!file)return;
+ if(file.size>16*1024*1024)throw new Error('Word list is too large (maximum 16 MB).');
+ const contents=await dictionaryEditor.readFile(()=>file.text());
+ if(contents!==null&&$('dictionary-dialog').open)loadDictionaryText(contents);
+});
+$('save-dictionary').onclick=protect(()=>dictionaryEditor.save(dictionaryPages.text()));
+document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
+$('demo').onclick=async()=>{if((puzzle.image||puzzle.cells.some(c=>c.number||c.letter||c.guess||c.black))&&!await confirmAction('Replace this workspace with the example? Save first to keep current work.'))return;const demo=fresh(3,3);demo.name='First steps · word square';const letters='CATARETEN',mapping={C:'1',A:'2',T:'3',R:'4',E:'5',N:'6'};demo.cells=demo.cells.map((c,i)=>({...c,number:mapping[letters[i]],letter:i===0?'C':'',openBeforeAcross:false,openAfterAcross:false,openBeforeDown:false,openAfterDown:false}));setPuzzle(demo);notify('Example loaded: a small word square. Click Solve, then review and accept suggestions.');};
+function renderStraighten(){
+ if(!puzzle.image)straightenHandles=null;
+ const active=!!straightenHandles;$('board-stage').classList.toggle('straightening',active);$('straighten-overlay').hidden=!active;$('straighten-panel').hidden=!active;$('straighten-photo').hidden=active;
+ $('straighten-apply').disabled=$('straighten-cancel').disabled=straightenBusy;
+ if(!active)return;
+ $('straighten-outline').setAttribute('d',Straighten.outlinePath(straightenHandles));
+ for(const name of Straighten.HANDLE_NAMES){const handle=$('handle-'+name);handle.style.left=straightenHandles[name].x*100+'%';handle.style.top=straightenHandles[name].y*100+'%';}
+}
+for(const name of Straighten.HANDLE_NAMES){
+ const handle=document.createElement('button'),corner=!['top','right','bottom','left'].includes(name);
+ handle.type='button';handle.id='handle-'+name;handle.className='straighten-handle'+(corner?'':' middle');
+ handle.setAttribute('aria-label',(corner?name.replace(/([A-Z])/,' $1').toLowerCase()+' corner':name+' edge middle')+' handle');
+ const moveTo=event=>{const box=$('straighten-overlay').getBoundingClientRect();straightenHandles=Straighten.moveHandle(straightenHandles,name,(event.clientX-box.left)/box.width,(event.clientY-box.top)/box.height);renderStraighten();};
+ handle.onpointerdown=event=>{if(straightenBusy)return;event.preventDefault();handle.setPointerCapture(event.pointerId);handle.onpointermove=moveTo;};
+ handle.onpointerup=handle.onpointercancel=()=>{handle.onpointermove=null;};
+ handle.onkeydown=event=>{const step=event.shiftKey?.01:.002,d={ArrowLeft:[-step,0],ArrowRight:[step,0],ArrowUp:[0,-step],ArrowDown:[0,step]}[event.key];if(!d||straightenBusy)return;event.preventDefault();const p=straightenHandles[name];straightenHandles=Straighten.moveHandle(straightenHandles,name,p.x+d[0],p.y+d[1]);renderStraighten();};
+ $('straighten-overlay').append(handle);
+}
+$('straighten-photo').onclick=()=>{if(!puzzle.image||!editMode)return;straightenHandles=Straighten.defaultHandles();fitMode='puzzle';updateView();renderStraighten();$('board-stage').scrollIntoView({block:'nearest'});};
+$('straighten-cancel').onclick=()=>{straightenHandles=null;renderStraighten();};
+$('straighten-apply').onclick=protect(async()=>{
+ if(!straightenHandles||straightenBusy)return;
+ if(puzzle.cells.some(c=>c.number||c.letter||c.guess||c.black)&&!await confirmAction('Straightening replaces the image and reads the grid again. Current grid entries are replaced. Continue?'))return;
+ const target=puzzle,version=revision,handles=straightenHandles;straightenBusy=true;renderStraighten();
+ notify('Straightening the photo and evening out its cells locally…');
+ try{
+  const flat=await api('/api/straighten',{image:puzzle.image,handles});
+  if(puzzle!==target||revision!==version)return notify('The puzzle changed while straightening. Try again.');
+  straightenHandles=null;solveJob.cancel();
+  Object.assign(puzzle,{image:flat.image,straightenedPhoto:true,imageBounds:flat.bounds||{x:0,y:0,width:1,height:1}});
+  if(flat.rows){puzzle.rows=flat.rows;puzzle.cols=flat.cols;}
+  puzzle.cells=fresh(puzzle.rows,puzzle.cols).cells;selected=0;numericEntry=null;invalidate();syncControls();render();
+  const recognitionVersion=revision;
+  try{
+   const result=await api('/api/ocr',flat.rows?{image:flat.image,rows:flat.rows,cols:flat.cols,bounds:flat.bounds,photo:true}:{image:flat.image,autoDetect:true,photo:true});
+   if(puzzle!==target||revision!==recognitionVersion)return notify('The puzzle changed during recognition. Read the grid from the image again when ready.');
+   puzzle.rows=result.rows;puzzle.cols=result.cols;puzzle.imageBounds=result.bounds||puzzle.imageBounds;puzzle.cells=result.cells.map(c=>({...c,prefilled:!!c.letter}));
+   invalidate();syncControls();render();notify(['Photo straightened. Review recognized cells before solving.',...(result.diagnostics||[])].join(' '));
+  }catch(error){notify('Photo straightened, but the grid could not be read: '+error.message+' Set rows and columns, apply them to the image, then read the grid again.',true);}
+ }finally{straightenBusy=false;renderStraighten();}
+});
+// Autosave: the server keeps one copy of the workspace, so a reload or
+// closed tab never loses work. Explicit Save/Export still name and keep puzzles.
+let savedFingerprint='',autosavedFingerprint=null,autosaveBusy=false,autosaveError='';
+function workspaceFingerprint(){return JSON.stringify(puzzle,(key,value)=>key==='image'&&typeof value==='string'?value.length+':'+value.slice(-64):value);}
+function hasUnsavedChanges(){return workspaceFingerprint()!==savedFingerprint;}
+async function autosaveNow(){
+ if(autosavedFingerprint===null||autosaveBusy)return;
+ const fingerprint=workspaceFingerprint();if(fingerprint===autosavedFingerprint)return;
+ autosaveBusy=true;
+ try{await api('/api/autosave',{puzzle,unsaved:fingerprint!==savedFingerprint},'PUT');autosavedFingerprint=fingerprint;autosaveError='';}
+ catch(error){if(error.message!==autosaveError){autosaveError=error.message;notify('Automatic backup failed: '+error.message+' Save the puzzle to keep your work.',true);}}
+ finally{autosaveBusy=false;}
+}
+async function restoreAutosave(){
+ const version=revision,initial=puzzle;
+ try{
+  const {autosave}=await api('/api/autosave');
+  if(autosave&&puzzle===initial&&version===revision){
+   const restored=await restorePuzzle(autosave.puzzle);
+   if(puzzle===initial&&version===revision){setPuzzle(restored);if(autosave.unsaved)savedFingerprint='';notify(autosave.unsaved?'Restored your workspace with its unsaved changes. Save it to keep it as a named puzzle.':'Restored your last workspace.');}
+  }
+ }catch(error){notify('Could not restore the automatic backup: '+error.message,true);}
+ finally{autosavedFingerprint=workspaceFingerprint();setInterval(autosaveNow,1500);}
+}
+window.addEventListener('beforeunload',event=>{if(hasUnsavedChanges()){event.preventDefault();event.returnValue='';}});
+setPuzzle(fresh());restoreAutosave();api('/api/health').then(data=>{ocrAvailable=data.ocrAvailable;$('ocr-status').textContent=ocrAvailable?'Local OCR available. Recognition can make mistakes.':'OCR is unavailable. Manual image transcription is supported.';}).catch(error=>notify('Could not reach the local server: '+error.message,true));

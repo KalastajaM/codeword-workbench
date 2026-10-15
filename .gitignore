@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.venv/
+data/*
+!data/.gitkeep
+
+# Local settings, credentials and generated files
+.DS_Store
+Thumbs.db
+.env
+.env.*
+*.pem
+*.key
+*.log
+*.tmp
+node_modules/
+build/
+dist/
+.pytest_cache/
+_secondbrain-outbox/

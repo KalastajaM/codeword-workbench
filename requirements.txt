@@ -1,0 +1,2 @@
+# Optional for screenshot recognition. Drawing and solving work without it.
+Pillow>=10.4,<13
