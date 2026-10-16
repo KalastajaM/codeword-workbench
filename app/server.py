@@ -1,26 +1,46 @@
-"""Local-first HTTP API with explicit authenticated hosted mode."""
-import base64
-import binascii
+"""Local-first HTTP API with an explicit hosted mode.
+
+Hosted access has two levels. Guests (when public access is enabled) work in
+the browser and get a temporary dictionary folder outside the data volume.
+User mode (after entering the shared access password) uses the persistent
+data directory, exactly like the local app.
+"""
+import hashlib
 import hmac
 import ipaddress
 import json
 import mimetypes
 import os
 import re
+import shutil
+import tempfile
 import threading
+import time
 import unicodedata
 import uuid
+from collections import deque
 from datetime import datetime, timezone
+from functools import partial
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, unquote
 
 from . import ocr
-from .dictionaries import ALPHABETS, MAX_WORDS
+from .dictionaries import ALPHABETS, MAX_IMPORT_BYTES, MAX_WORDS
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_BODY = 20_000_000
 ID_RE = re.compile(r'^[a-f0-9]{32}$')
+
+USER_COOKIE = 'cw_user'
+GUEST_COOKIE = 'cw_guest'
+USER_SESSION_SECONDS = 14 * 24 * 3600
+GUEST_MAX_WORDS = 200_000
+GUEST_MAX_IMPORT_BYTES = 4 * 1024 * 1024
+GUEST_IDLE_SECONDS = 2 * 3600
+MAX_GUEST_WORKSPACES = 10
+LOGIN_FAILURES_PER_MINUTE = 10
 
 
 def check_puzzle(p):
@@ -177,6 +197,95 @@ class PuzzleStore:
         return {'deleted': True, 'id': key}
 
 
+class GuestCapacityError(Exception):
+    pass
+
+
+class GuestWorkspaces:
+    """Temporary dictionary folders, one per guest browser session.
+
+    They live in the container's temporary directory, never on the data
+    volume, and are removed after GUEST_IDLE_SECONDS without use or when the
+    server stops. A guest without one reads the bundled demonstration lists.
+    """
+
+    def __init__(self, limit=MAX_GUEST_WORKSPACES, idle_seconds=GUEST_IDLE_SECONDS):
+        self.root = Path(tempfile.mkdtemp(prefix='codeword-guests-'))
+        self.limit, self.idle_seconds = limit, idle_seconds
+        self.last_used = {}
+        self.lock = threading.Lock()
+
+    def _remove(self, key):
+        from .dictionaries import forget
+        forget(self.root/key)
+        shutil.rmtree(self.root/key, ignore_errors=True)
+
+    def path(self, key, writing=False):
+        if not ID_RE.fullmatch(key):
+            raise ValueError('Invalid guest session.')
+        with self.lock:
+            now = time.monotonic()
+            for other, used in list(self.last_used.items()):
+                if now - used > self.idle_seconds:
+                    del self.last_used[other]
+                    self._remove(other)
+            if key in self.last_used or writing:
+                if key not in self.last_used and len(self.last_used) >= self.limit:
+                    raise GuestCapacityError('Too many guests are editing dictionaries right now. Try again later, or switch to user mode.')
+                self.last_used[key] = now
+            return self.root/key
+
+    def close(self):
+        with self.lock:
+            for key in list(self.last_used):
+                self._remove(key)
+            self.last_used.clear()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+
+class GuestCapacity:
+    """Guests share one of the expensive-work slots, so user mode always has one free."""
+
+    def __init__(self, shared):
+        self.shared, self.guest = shared, threading.BoundedSemaphore(1)
+
+    def acquire(self, blocking=False):
+        if not self.guest.acquire(blocking=False):
+            return False
+        if self.shared.acquire(blocking=False):
+            return True
+        self.guest.release()
+        return False
+
+    def release(self):
+        self.shared.release()
+        self.guest.release()
+
+
+class LoginLimiter:
+    """At most LOGIN_FAILURES_PER_MINUTE wrong passwords per minute, server-wide."""
+
+    def __init__(self, limit=LOGIN_FAILURES_PER_MINUTE, window=60):
+        self.limit, self.window = limit, window
+        self.failures = deque()
+        self.lock = threading.Lock()
+
+    def _trim(self, now):
+        while self.failures and now - self.failures[0] > self.window:
+            self.failures.popleft()
+
+    def allowed(self):
+        with self.lock:
+            self._trim(time.monotonic())
+            return len(self.failures) < self.limit
+
+    def failed(self):
+        with self.lock:
+            now = time.monotonic()
+            self._trim(now)
+            self.failures.append(now)
+
+
 class AutosaveStore:
     """One recoverable copy of the current workspace, so a reload loses nothing."""
 
@@ -250,6 +359,33 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
     autosave = AutosaveStore(data_dir or ROOT/'data')
     data_dir = Path(data_dir or ROOT/'data')
     expensive = threading.BoundedSemaphore(2)
+    guest_capacity = GuestCapacity(expensive)
+    guest_access = bool(hosted_host) and allow_public is True
+    user_login = bool(hosted_host) and access_password is not None
+    guests = GuestWorkspaces() if guest_access else None
+    login_limiter = LoginLimiter()
+    # Changing the password invalidates every user session.
+    session_key = hashlib.sha256(b'codeword-workbench-session\0' + access_password.encode('utf-8')).digest() if user_login else None
+
+    def sign(value):
+        return hmac.new(session_key, value.encode('ascii'), hashlib.sha256).hexdigest()
+
+    def new_user_session():
+        body = f'{int(time.time()) + USER_SESSION_SECONDS}.{uuid.uuid4().hex}'
+        return body + '.' + sign(body)
+
+    def valid_user_session(token):
+        if not session_key or not isinstance(token, str):
+            return False
+        parts = token.split('.')
+        if len(parts) != 3 or not parts[0].isdigit() or not ID_RE.fullmatch(parts[1]):
+            return False
+        return hmac.compare_digest(parts[2], sign(parts[0] + '.' + parts[1])) and int(parts[0]) > time.time()
+
+    def session_info(access):
+        return {'mode': access or 'signed-out', 'guestAccess': guest_access, 'userLogin': user_login,
+                'guestLimits': {'words': GUEST_MAX_WORDS, 'importMegabytes': GUEST_MAX_IMPORT_BYTES // (1024 * 1024),
+                                'idleHours': GUEST_IDLE_SECONDS // 3600}}
 
     def morphology_for(puzzle):
         from .morphology import MorphologyIndex
@@ -257,7 +393,7 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
         path = data_dir/'morphology'/'fi.sqlite'
         return (MorphologyIndex(path) if requested and path.exists() else None), requested
 
-    def run_lookup(puzzle, query, use_mappings):
+    def run_lookup(puzzle, query, use_mappings, words_dir=data_dir):
         """Word lookup always checks the dictionary; pattern search follows the puzzle setting."""
         from .dictionaries import active_words
         from .lookup import parse_pattern, pattern_search
@@ -271,21 +407,21 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
         wants_morphology = puzzle['language'] == 'fi' and puzzle.get('useMorphology', True) and use_words
         index = MorphologyIndex(path) if wants_morphology and path.exists() else None
         if word_only:
-            state = dictionary_state(puzzle['language'], data_dir)
+            state = dictionary_state(puzzle['language'], words_dir)
             word = ''.join(value for _, value in tokens)
             result = lookup_word(puzzle, word, state['active'], index, state['active_set'])
             result['disabled'] = word in state['disabled']
         else:
-            words = active_words(puzzle['language'], data_dir) if use_words else []
+            words = active_words(puzzle['language'], words_dir) if use_words else []
             result = pattern_search(dict(puzzle, useDictionary=use_words), query, words, morphology=index, use_mappings=use_mappings)
         if wants_morphology and index is None:
             result['diagnostics'].append('Local Finnish morphology index is unavailable; searched the word list only.')
         return result
 
-    def run_solve(puzzle, **options):
+    def run_solve(puzzle, words_dir=data_dir, **options):
         from .solver import solve
         from .dictionaries import active_words
-        words = active_words(puzzle['language'], data_dir) if puzzle.get('useDictionary',True) else []
+        words = active_words(puzzle['language'], words_dir) if puzzle.get('useDictionary',True) else []
         index, requested = morphology_for(puzzle)
         result = solve(puzzle, words, morphology=index, **options)
         if requested and index is None:
@@ -303,15 +439,15 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
             self.connection.settimeout(30)
 
 
-        def send_data(self, code, data, content_type='application/json; charset=utf-8', challenge=False):
+        def send_data(self, code, data, content_type='application/json; charset=utf-8'):
             if not isinstance(data, bytes):
                 data = json.dumps(data, ensure_ascii=False, allow_nan=False).encode('utf-8')
             self.send_response(code)
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', str(len(data)))
             self.send_header('Cache-Control', 'no-store')
-            if challenge:
-                self.send_header('WWW-Authenticate', 'Basic realm="Codeword Workbench", charset="UTF-8"')
+            for cookie in getattr(self, 'set_cookies', ()):
+                self.send_header('Set-Cookie', cookie)
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
             self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'")
@@ -330,23 +466,40 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
             if len(self.headers.get_all('Origin', [])) > 1 or (origin is not None and origin not in origins):
                 self.send_data(403, {'error': 'Cross-origin requests are not accepted.'})
                 return False
-            if hosted_host and access_password is not None:
-                authorization = self.headers.get('Authorization', '')
-                authenticated = False
-                try:
-                    scheme, encoded = authorization.split(' ', 1)
-                    decoded = base64.b64decode(encoded, validate=True)
-                    username, password = decoded.split(b':', 1)
-                    authenticated = (scheme.lower() == 'basic' and
-                                     hmac.compare_digest(username, b'codeword') and
-                                     hmac.compare_digest(password, access_password.encode('utf-8')) and
-                                     len(self.headers.get_all('Authorization', [])) == 1)
-                except (ValueError, binascii.Error):
-                    pass
-                if not authenticated:
-                    self.send_data(401, {'error': 'Authentication required.'}, challenge=True)
-                    return False
             return True
+
+        def cookies(self):
+            headers = self.headers.get_all('Cookie', [])
+            if len(headers) != 1:
+                return {}
+            jar = SimpleCookie()
+            try:
+                jar.load(headers[0])
+            except CookieError:
+                return {}
+            return {name: morsel.value for name, morsel in jar.items()}
+
+        def set_cookie(self, name, value, max_age=None):
+            cookie = f'{name}={value}; Path=/; HttpOnly; Secure; SameSite=Strict'
+            if max_age is not None:
+                cookie += f'; Max-Age={max_age}'
+            self.set_cookies.append(cookie)
+
+        def access(self):
+            """'local', 'user', 'guest', or None when the visitor must sign in."""
+            if not hosted_host:
+                return 'local'
+            if valid_user_session(self.cookies().get(USER_COOKIE)):
+                return 'user'
+            return 'guest' if guest_access else None
+
+        def guest_id(self):
+            key = self.cookies().get(GUEST_COOKIE, '')
+            if not ID_RE.fullmatch(key):
+                # A browser-session cookie: closing the browser ends the guest session.
+                key = uuid.uuid4().hex
+                self.set_cookie(GUEST_COOKIE, key)
+            return key
 
         def payload(self):
             if self.headers.get('Content-Type', '').split(';')[0].strip() != 'application/json':
@@ -391,11 +544,52 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
             if method == 'GET' and self.path == '/healthz':
                 self.send_data(200, {'ok': True})
                 return
+            self.set_cookies = []
             if not self.trusted_request():
                 return
             path = urlsplit(self.path).path
+            access = self.access()
+            guest = access == 'guest'
+            # The app shell, session state and sign-in are open; data routes follow the access policy.
+            open_route = ((method == 'GET' and (path == '/api/session' or not path.startswith('/api/'))) or
+                          (method == 'POST' and path in ('/api/login', '/api/logout')))
+            if not open_route and access is None:
+                self.send_data(401, {'error': 'Enter the access password to use this workspace.', 'signIn': True})
+                return
+            if guest and (path in ('/api/autosave', '/api/puzzles') or path.startswith('/api/puzzles/')):
+                self.send_data(403, {'error': 'Saved puzzles need user mode. In guest mode, use Export JSON to keep a copy.'})
+                return
+            slots = guest_capacity if guest else expensive
+            max_words = GUEST_MAX_WORDS if guest else MAX_WORDS
+
+            def words_dir(writing=False):
+                return guests.path(self.guest_id(), writing) if guest else data_dir
+
+            def labelled(result):
+                if guest and isinstance(result, dict) and result.get('source') == 'custom local dictionary':
+                    result['source'] = 'temporary guest dictionary'
+                return result
             try:
-                if method == 'GET' and path == '/api/health':
+                if method == 'GET' and path == '/api/session':
+                    self.send_data(200, session_info(access))
+                elif method == 'POST' and path == '/api/login':
+                    if not user_login:
+                        raise ValueError('User mode is not available on this server.')
+                    if not login_limiter.allowed():
+                        self.send_data(429, {'error': 'Too many incorrect passwords. Wait a minute and try again.'})
+                        return
+                    password = self.payload().get('password')
+                    if not isinstance(password, str) or not hmac.compare_digest(password.encode('utf-8'), access_password.encode('utf-8')):
+                        login_limiter.failed()
+                        self.send_data(401, {'error': 'Incorrect password.'})
+                        return
+                    self.set_cookie(USER_COOKIE, new_user_session(), USER_SESSION_SECONDS)
+                    self.send_data(200, session_info('user'))
+                elif method == 'POST' and path == '/api/logout':
+                    if hosted_host:
+                        self.set_cookie(USER_COOKIE, '', 0)
+                    self.send_data(200, session_info('local' if not hosted_host else 'guest' if guest_access else None))
+                elif method == 'GET' and path == '/api/health':
                     self.send_data(200, {'ok': True, 'ocrAvailable': ocr.available()})
                 elif method == 'GET' and path == '/api/autosave':
                     self.send_data(200, {'autosave': autosave.get()})
@@ -413,7 +607,8 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
                     self.send_data(200, store.save(self.payload()))
                 elif method == 'POST' and re.fullmatch(r'/api/dictionaries/[^/]+/import', path):
                     from .dictionaries import import_dictionary
-                    self.send_data(200, import_dictionary(path.split('/')[3], self.payload().get('text'), data_dir))
+                    self.send_data(200, labelled(import_dictionary(path.split('/')[3], self.payload().get('text'), words_dir(True),
+                                                                   max_words, GUEST_MAX_IMPORT_BYTES if guest else MAX_IMPORT_BYTES)))
                 elif method == 'GET' and re.fullmatch(r'/api/dictionaries/[^/]+/search', path):
                     from .dictionaries import search_dictionary
                     from urllib.parse import parse_qs
@@ -421,14 +616,15 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
                     first = lambda name, default='': query.get(name, [default])[0]
                     if not first('offset', '0').isdigit():
                         raise ValueError('Invalid result page.')
-                    self.send_data(200, search_dictionary(path.split('/')[3], data_dir, first('q'), first('status', 'all'),
+                    self.send_data(200, search_dictionary(path.split('/')[3], words_dir(), first('q'), first('status', 'all'),
                                                           int(first('offset', '0'))))
                 elif method == 'POST' and re.fullmatch(r'/api/dictionaries/[^/]+/entries', path):
                     from .dictionaries import edit_dictionary
                     edits = self.payload()
                     if not isinstance(edits, dict):
                         raise ValueError('Dictionary edits must be a JSON object.')
-                    self.send_data(200, edit_dictionary(path.split('/')[3], data_dir, **{k: edits.get(k, []) for k in ('add', 'remove', 'enable', 'disable')}))
+                    self.send_data(200, labelled(edit_dictionary(path.split('/')[3], words_dir(True), max_words=max_words,
+                                                                 **{k: edits.get(k, []) for k in ('add', 'remove', 'enable', 'disable')})))
                 elif path.startswith('/api/dictionaries/') and method in ('GET', 'PUT'):
                     from .dictionaries import get_dictionary, save_dictionary
                     language = path.rsplit('/', 1)[1]
@@ -436,14 +632,16 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
                         raise ValueError('Select English, Finnish, Dutch or Swedish.')
                     if method == 'GET':
                         from .dictionaries import get_disabled
-                        self.send_data(200, dict(get_dictionary(language, data_dir), disabled=get_disabled(language, data_dir)))
+                        folder = words_dir()
+                        self.send_data(200, labelled(dict(get_dictionary(language, folder), disabled=get_disabled(language, folder))))
                     else:
                         words = self.payload().get('words')
-                        if not isinstance(words, list) or len(words) > MAX_WORDS or any(not isinstance(w, str) or len(w) > 100 for w in words):
-                            raise ValueError('Dictionary must contain up to 1,000,000 text entries of at most 100 characters each.')
-                        self.send_data(200, save_dictionary(language, words, data_dir))
+                        if not isinstance(words, list) or len(words) > max_words or any(not isinstance(w, str) or len(w) > 100 for w in words):
+                            raise ValueError(f'Dictionary must contain up to {max_words:,} text entries of at most 100 characters each.')
+                        self.send_data(200, labelled(save_dictionary(language, words, words_dir(True), max_words)))
                 elif method == 'POST' and path == '/api/solve-jobs':
-                    self.send_data(202, jobs.start(check_puzzle(self.payload())))
+                    puzzle = check_puzzle(self.payload())
+                    self.send_data(202, jobs.start(puzzle, slots, partial(run_solve, words_dir=words_dir())))
                 elif method in ('GET', 'DELETE') and path.startswith('/api/solve-jobs/'):
                     key = path.rsplit('/',1)[1]
                     if not ID_RE.fullmatch(key):
@@ -452,13 +650,13 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
                 elif method == 'POST' and path == '/api/pdf':
                     from .pdf_import import convert
                     payload = self.payload()
-                    if not expensive.acquire(blocking=False):
+                    if not slots.acquire(blocking=False):
                         self.send_data(429, {'error': 'Another import or solve is running. Try again shortly.'})
                         return
                     try:
                         self.send_data(200, convert(payload))
                     finally:
-                        expensive.release()
+                        slots.release()
                 elif method == 'POST' and path == '/api/lookup':
                     payload = self.payload()
                     if not isinstance(payload, dict) or not isinstance(payload.get('query'), str):
@@ -469,15 +667,15 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
                     if re.fullmatch(r'[^\d?._*]*', payload['query']):
                         # Single-word checks are cheap (cached word set) and run
                         # on every selection, so they never wait for a search.
-                        self.send_data(200, run_lookup(p, payload['query'], True))
+                        self.send_data(200, run_lookup(p, payload['query'], True, words_dir()))
                         return
-                    if not expensive.acquire(blocking=False):
+                    if not slots.acquire(blocking=False):
                         self.send_data(429, {'error': 'Another search is running. Try again shortly.'})
                         return
                     try:
-                        self.send_data(200, run_lookup(p, payload['query'], payload.get('useMappings', True) is not False))
+                        self.send_data(200, run_lookup(p, payload['query'], payload.get('useMappings', True) is not False, words_dir()))
                     finally:
-                        expensive.release()
+                        slots.release()
                 elif method == 'POST' and path in ('/api/validate', '/api/solve', '/api/ocr', '/api/candidates'):
                     p = self.payload()
                     slot_ids = None
@@ -495,7 +693,7 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
                             result['suggestedEliminations'] = suggested_eliminations(p)
                         self.send_data(200, result)
                     else:
-                        if not expensive.acquire(blocking=False):
+                        if not slots.acquire(blocking=False):
                             self.send_data(429, {'error': 'Another solve or recognition is running. Try again shortly.'})
                             return
                         try:
@@ -504,7 +702,7 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
                             else:
                                 if path == '/api/candidates':
                                     from .dictionaries import active_words
-                                    words = active_words(p['language'], data_dir) if p.get('useDictionary', True) else []
+                                    words = active_words(p['language'], words_dir()) if p.get('useDictionary', True) else []
                                     from .candidates import find_candidates
                                     from .morphology import MorphologyIndex
                                     index_path = data_dir/'morphology'/'fi.sqlite'
@@ -514,30 +712,30 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
                                     if use_morphology and index is None:
                                         result['diagnostics'].append('Local Finnish morphology index is unavailable; searched the word list only.')
                                 else:
-                                    result = run_solve(p)
+                                    result = run_solve(p, words_dir())
                             self.send_data(200, result)
                         finally:
-                            expensive.release()
+                            slots.release()
                 elif method == 'POST' and path == '/api/straighten/detect':
                     p = self.payload()
-                    if not expensive.acquire(blocking=False):
+                    if not slots.acquire(blocking=False):
                         self.send_data(429, {'error': 'Another solve or recognition is running. Try again shortly.'})
                         return
                     try:
                         from .straighten import detect
                         self.send_data(200, detect(p))
                     finally:
-                        expensive.release()
+                        slots.release()
                 elif method == 'POST' and path == '/api/straighten':
                     p = self.payload()
-                    if not expensive.acquire(blocking=False):
+                    if not slots.acquire(blocking=False):
                         self.send_data(429, {'error': 'Another solve or recognition is running. Try again shortly.'})
                         return
                     try:
                         from .straighten import straighten
                         self.send_data(200, straighten(p))
                     finally:
-                        expensive.release()
+                        slots.release()
                 elif method == 'GET' and not path.startswith('/api/'):
                     relative = unquote(path).lstrip('/') or 'index.html'
                     target = (ROOT/'static'/relative).resolve()
@@ -547,7 +745,7 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
                     self.send_data(200, target.read_bytes(), mime)
                 else:
                     self.send_data(404, {'error': 'Endpoint not found.'})
-            except JobCapacityError as exc:
+            except (JobCapacityError, GuestCapacityError) as exc:
                 self.send_data(429, {'error': str(exc)})
             except FileNotFoundError:
                 self.send_data(404, {'error': 'File or puzzle not found.'})
@@ -563,6 +761,8 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
     class LocalServer(ThreadingHTTPServer):
         def server_close(self):
             jobs.close()
+            if guests:
+                guests.close()
             super().server_close()
 
     server = LocalServer((host, port), Handler)

@@ -23,9 +23,9 @@ def normalize(text):
     return unicodedata.normalize('NFC', text.strip().upper())
 
 
-def clean_words(language, words):
+def clean_words(language, words, max_words=MAX_WORDS):
     if language not in ALPHABETS: raise ValueError('Unsupported language.')
-    if not isinstance(words,list) or len(words)>MAX_WORDS: raise ValueError('Expected a list of at most 1,000,000 words.')
+    if not isinstance(words,list) or len(words)>max_words: raise ValueError(f'Expected a list of at most {max_words:,} words.')
     alphabet=set(ALPHABETS[language]); result=set()
     for word in words:
         if not isinstance(word,str): raise ValueError('Dictionary entries must be strings.')
@@ -37,15 +37,15 @@ def clean_words(language, words):
     return sorted(result)
 
 
-def import_dictionary(language, text, data_dir):
+def import_dictionary(language, text, data_dir, max_words=MAX_WORDS, max_bytes=MAX_IMPORT_BYTES):
     """Import real-world lists, reporting discarded lines without altering spellings."""
     if language not in ALPHABETS:
         raise ValueError('Unsupported language.')
-    if not isinstance(text, str) or len(text.encode('utf-8')) > MAX_IMPORT_BYTES:
-        raise ValueError('Word list must be UTF-8 text of at most 16 MB.')
+    if not isinstance(text, str) or len(text.encode('utf-8')) > max_bytes:
+        raise ValueError(f'Word list must be UTF-8 text of at most {max_bytes // (1024 * 1024)} MB.')
     lines = text.removeprefix('\ufeff').splitlines()
-    if len(lines) > MAX_WORDS:
-        raise ValueError('Word list must contain at most 1,000,000 lines.')
+    if len(lines) > max_words:
+        raise ValueError(f'Word list must contain at most {max_words:,} lines.')
     alphabet = set(ALPHABETS[language])
     words = set()
     total = skipped = duplicates = 0
@@ -62,7 +62,7 @@ def import_dictionary(language, text, data_dir):
             words.add(word)
     if not words:
         raise ValueError('No usable words found for the selected alphabet. Existing dictionary was kept.')
-    result = save_dictionary(language, list(words), data_dir)
+    result = save_dictionary(language, list(words), data_dir, max_words)
     result.update(total=total, skipped=skipped, duplicates=duplicates)
     return result
 
@@ -78,8 +78,22 @@ def get_dictionary(language, data_dir):
 
 MAX_EDIT_ENTRIES = 10000
 SEARCH_PAGE = 100
+# Keyed by (workspace folder, language): the shared workspace and each
+# temporary guest workspace keep separate cached lists.
 _states = {}
 _edit_lock = threading.RLock()
+
+
+def _state_key(language, data_dir):
+    return (os.path.abspath(data_dir), language)
+
+
+def forget(data_dir):
+    """Drop cached lists for a workspace folder that is being removed."""
+    folder = os.path.abspath(data_dir)
+    with _edit_lock:
+        for key in [key for key in _states if key[0] == folder]:
+            del _states[key]
 
 
 def _file_key(path):
@@ -111,7 +125,7 @@ def dictionary_state(language, data_dir):
     """
     if language not in ALPHABETS: raise ValueError('Unsupported language.')
     key = tuple(_file_key(path) for path in _paths(language, data_dir))
-    cached = _states.get(language)
+    cached = _states.get(_state_key(language, data_dir))
     if cached and cached[0] == key: return cached[1]
     words = get_dictionary(language, data_dir)['words']
     return _store_state(language, data_dir, words, frozenset(get_disabled(language, data_dir)))
@@ -124,7 +138,7 @@ def _store_state(language, data_dir, words, disabled, word_set=None):
     active = [w for w in words if w not in disabled] if disabled else words
     state = dict(words=words, word_set=word_set, disabled=disabled, active=active,
                  active_set=word_set - disabled if disabled else word_set)
-    _states[language] = (tuple(_file_key(path) for path in _paths(language, data_dir)), state)
+    _states[_state_key(language, data_dir)] = (tuple(_file_key(path) for path in _paths(language, data_dir)), state)
     return state
 
 
@@ -150,8 +164,8 @@ def _write_json(path, value):
         if os.path.exists(name): os.unlink(name)
 
 
-def save_dictionary(language, words, data_dir):
-    words=clean_words(language,words)
+def save_dictionary(language, words, data_dir, max_words=MAX_WORDS):
+    words=clean_words(language,words,max_words)
     with _edit_lock:
         path, disabled_path = _paths(language, data_dir)
         _write_json(path, words)
@@ -188,7 +202,7 @@ def search_dictionary(language, data_dir, query='', status='all', offset=0, limi
                 custom=_paths(language, data_dir)[0].exists())
 
 
-def edit_dictionary(language, data_dir, add=None, remove=None, enable=None, disable=None):
+def edit_dictionary(language, data_dir, add=None, remove=None, enable=None, disable=None, max_words=MAX_WORDS):
     """Apply small edits immediately. A demonstration list becomes a custom list."""
     if language not in ALPHABETS: raise ValueError('Unsupported language.')
     lists = {name: [] if items is None else items for name, items in dict(add=add, remove=remove, enable=enable, disable=disable).items()}
@@ -216,7 +230,7 @@ def edit_dictionary(language, data_dir, add=None, remove=None, enable=None, disa
         path, disabled_path = _paths(language, data_dir)
         listed = state['words']
         if added or removed or not path.exists():
-            if len(words) > MAX_WORDS: raise ValueError('A dictionary can hold at most 1,000,000 entries.')
+            if len(words) > max_words: raise ValueError(f'A dictionary can hold at most {max_words:,} entries.')
             listed = sorted(words)
             _write_json(path, listed)
         if disabled != set(state['disabled']):
