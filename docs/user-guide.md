@@ -6,6 +6,8 @@ Installation is in the [README](../README.md). Word lists are covered in [dictio
 
 Select **Try a small example**, then **Solve puzzle**. The example deliberately permits alternative solutions. Suggestions appear in teal; confirmed letters have a solid style. Select an alternative and accept a cell, the selected across/down word, or the full suggestion.
 
+**How codeword solving works** (next to **Try a small example**) opens a page in a new tab that shows the solving stages and steps through a strict search on a small example. You can confirm or release letters in its example grid to see how the search changes. The page is `static/how-it-works.html`; it uses no server data and also opens directly from the file.
+
 To create your own puzzle:
 
 1. Choose a language. For a drawn puzzle, set dimensions and choose **Create new grid**. For a screenshot, add the image directly; the app detects the main grid and updates dimensions.
@@ -74,8 +76,6 @@ A word lookup always checks your word list (and, for Finnish, the local form ind
 Pattern labels are calibrated per word length on held-out real words and letter-shuffled fakes, so a short word is not judged by long-word standards. Short words overlap heavily with random strings: most two- and three-letter words are labelled unusual, and the check says little about them.
 
 ## Full-grid search controls
-
-[solver-visualization.html](solver-visualization.html) shows the solving stages and steps through a strict search on a small example. Open it in a browser; it needs no server.
 
 **Quick** searches for up to four seconds of solver time; **Deep** permits up to sixty seconds and a larger node budget; **Extended** permits up to five minutes with a further increase in the node budget. The search time starts after preparation: loading the word list, adapting the letter model to it and indexing it for the puzzle. With a large list this can take a few seconds; the status then reads **Preparing:** and the step, and it does not use up the search budget. Cancel works during preparation too. Progress then shows the current stage, visited search nodes and elapsed time (including preparation). **Cancel search** requests backend cancellation and waits for the best available provisional result. If the new search has no useful result, existing suggestions stay visible. Search status reports whether time, nodes, the alternative limit, cancellation or completion ended the search. Candidate and memory pruning are reported separately; more time cannot recover candidates excluded by those limits. Editing constraints or replacing the puzzle also cancels the old request and prevents late results from changing your workspace.
 

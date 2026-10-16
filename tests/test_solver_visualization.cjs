@@ -3,13 +3,11 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-// The walkthrough page carries a port of the strict search; keep it in step with app/solver.py.
-const html = fs.readFileSync(path.join(__dirname, '..', 'docs', 'solver-visualization.html'), 'utf8');
-const engine = { exports: {} };
-new Function('module', html.match(/<script id="engine">([\s\S]*?)<\/script>/)[1])(engine);
-const { solve } = engine.exports;
-const words = html.match(/const WORDS='([^']*)'/)[1].split(' ');
-const score = JSON.parse(html.match(/const SCORE=(\{.*?\});/)[1].replace(/(\w+):/g, '"$1":'));
+// The how-it-works page carries a port of the strict search; keep it in step with app/solver.py.
+const { solve } = require('../static/how-it-works-engine.js');
+const page = fs.readFileSync(path.join(__dirname, '..', 'static', 'how-it-works.js'), 'utf8');
+const words = page.match(/const WORDS='([^']*)'/)[1].split(' ');
+const score = JSON.parse(page.match(/const SCORE=(\{.*?\});/)[1].replace(/(\w+):/g, '"$1":'));
 const numbers = [1, 2, 3, 2, 3, 4, 3, 4, 5];
 
 function puzzle(confirmed) {
@@ -28,4 +26,10 @@ test('without confirmed letters the search backtracks more', () => {
   const run = solve(puzzle({}), words, score);
   assert.ok(run.trace.filter(t => t.type === 'dead').length > 2);
   assert.ok(run.sols.some(s => s.join('') === 'SEAEARART'));
+});
+
+test('page loads its scripts as files, as the app CSP requires', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'static', 'how-it-works.html'), 'utf8');
+  assert.ok(!/<script(?![^>]*\bsrc=)[^>]*>/.test(html));
+  assert.ok(!/https?:\/\//.test(html.replace(/<p[\s\S]*?<\/p>/g, '')));
 });
