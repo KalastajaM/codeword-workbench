@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app import language_model, solver, word_index
 from app.dictionaries import DEMO
@@ -61,6 +62,7 @@ def expected_facts():
         'maxCellNumber': max_cell_number(),
         'MAX_CANDIDATES': solver.MAX_CANDIDATES,
         'MAX_SOLUTIONS': solver.MAX_SOLUTIONS,
+        'MIN_MAPPING_DISTANCE': solver.MIN_MAPPING_DISTANCE,
         'MISSING_WORD_CANDIDATES': solver.MISSING_WORD_CANDIDATES,
         'MAX_FRAGMENTS': word_index.MAX_FRAGMENTS,
         'MAX_FRONTIER_CELLS': solver.MAX_FRONTIER_CELLS,
@@ -124,9 +126,9 @@ const {solve} = require(process.argv[1] + '/static/how-it-works-engine.js');
 const page = fs.readFileSync(process.argv[1] + '/static/how-it-works.js', 'utf8');
 const words = page.match(/const WORDS='([^']*)'/)[1].split(' ');
 const score = JSON.parse(page.match(/const SCORE=(\{.*?\});/)[1].replace(/(\w+):/g, '"$1":'));
-const puzzles = JSON.parse(fs.readFileSync(0, 'utf8'));
+const {puzzles, limit} = JSON.parse(fs.readFileSync(0, 'utf8'));
 console.log(JSON.stringify(puzzles.map(p => {
-  const run = solve(p, words, score);
+  const run = solve(p, words, score, limit);
   return {nodes: run.nodes, rounds: run.rounds, solutions: run.sols.map(s => s.join('')).sort()};
 })));
 """
@@ -135,16 +137,23 @@ console.log(JSON.stringify(puzzles.map(p => {
             cells = [dict(number=n, letter=ANSWER[i] if mask >> (n - 1) & 1 and NUMBERS.index(n) == i else '')
                      for i, n in enumerate(NUMBERS)]
             puzzles.append(dict(rows=3, cols=3, cells=cells))
-        output = subprocess.run(['node', '-e', runner, str(ROOT)], input=json.dumps(puzzles),
-                                capture_output=True, text=True, check=True, timeout=60).stdout
-        for puzzle, page in zip(puzzles, json.loads(output)):
-            cells = [dict(number=str(c['number']), letter=c['letter']) for c in puzzle['cells']]
-            result = solver.solve(dict(language='en', rows=3, cols=3, useDictionary=True, cells=cells), DEMO['en'].split())
-            real = dict(nodes=result['stats']['nodes'], rounds=result['stats']['propagationRounds'],
-                        solutions=sorted(''.join(s['letters']) for s in result['solutions']))
-            with self.subTest(confirmed=''.join(c['letter'] or '.' for c in cells)):
-                self.assertEqual(page, real, 'The page search port no longer matches app/solver.py; '
-                                             'update static/how-it-works-engine.js.')
+        # The real limit is never reached on this example; small limits
+        # exercise the port's top-k pruning against the solver's.
+        cut = 0
+        for limit in (solver.MAX_SOLUTIONS, 1, 2):
+            output = subprocess.run(['node', '-e', runner, str(ROOT)], input=json.dumps(dict(puzzles=puzzles, limit=limit)),
+                                    capture_output=True, text=True, check=True, timeout=60).stdout
+            for puzzle, page in zip(puzzles, json.loads(output)):
+                cells = [dict(number=str(c['number']), letter=c['letter']) for c in puzzle['cells']]
+                with patch('app.solver.MAX_SOLUTIONS', limit):
+                    result = solver.solve(dict(language='en', rows=3, cols=3, useDictionary=True, cells=cells), DEMO['en'].split())
+                cut += result['stats'].get('boundPruned', 0)
+                real = dict(nodes=result['stats']['nodes'], rounds=result['stats']['propagationRounds'],
+                            solutions=sorted(''.join(s['letters']) for s in result['solutions']))
+                with self.subTest(limit=limit, confirmed=''.join(c['letter'] or '.' for c in cells)):
+                    self.assertEqual(page, real, 'The page search port no longer matches app/solver.py; '
+                                                 'update static/how-it-works-engine.js.')
+        self.assertGreater(cut, 0, 'No example run exercised score pruning.')
 
 
 if __name__ == '__main__':

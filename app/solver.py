@@ -20,6 +20,8 @@ EXTENDED_SECONDS=300.0
 EXTENDED_NODES=5000000
 DEEP_NODES=1000000
 MAX_SOLUTIONS=12
+# Dictionary-free alternatives must differ in at least this many numbers.
+MIN_MAPPING_DISTANCE=3
 BEAM_WIDTH=64
 MAX_FRONTIER_CELLS=200000
 
@@ -252,16 +254,61 @@ def _global_heuristic(p, slots, base, rules, result, started, deadline, control)
         violations+=sum(1 for v in slot_vars[j] if assignment[v] in excluded[v])
         if j<len(slots) and _rejected(slots[j],text,rules): violations+=1
         return _score(text,language,rules,*boundaries[j]), violations
+    # Neighbouring states of one run differ by a swap or two. Keep only the
+    # best state of each run, polished to a local optimum, and require kept
+    # mappings to differ in several numbers so alternatives are distinct.
+    spread=min(MIN_MAPPING_DISTANCE,max(1,len(movable)//3))
     solutions={}
-    def remember(assignment, score, violations):
-        if violations: return
+    def keep(assignment, score):
         key=tuple(assignment)
         if key in solutions: return
-        if len(solutions)>=MAX_SOLUTIONS and score<=min(solutions.values()): return
+        close=[k for k in solutions if sum(a!=b for a,b in zip(k,key))<spread]
+        if any(solutions[k]>=score for k in close): return
+        for k in close: del solutions[k]
+        if len(solutions)>=MAX_SOLUTIONS:
+            worst=min(solutions,key=solutions.get)
+            if solutions[worst]>=score: return
+            del solutions[worst]
         solutions[key]=score
-        result['stats']['heuristicSolutionsFound']=min(len(solutions),MAX_SOLUTIONS)
-        if len(solutions)>MAX_SOLUTIONS: del solutions[min(solutions,key=solutions.get)]
-    iterations=0; restarts=0
+        result['stats']['heuristicSolutionsFound']=len(solutions)
+    def propose(assignment, values, v, letter):
+        """Apply a move in place; None when it would take a confirmed letter."""
+        changes={v:letter}
+        if v in numbered and rules['uniqueLetters']:
+            owner=next((u for u in numbered if assignment[u]==letter),None)
+            if owner in fixed: return None
+            if owner is not None: changes[owner]=assignment[v]
+        old={u:assignment[u] for u in changes}
+        impacted=set().union(*(affected[u] for u in changes))
+        for u,l in changes.items(): assignment[u]=l
+        updated={j:evaluate(j,assignment) for j in impacted}
+        gain=sum(updated[j][0]-values[j][0] for j in impacted)
+        broken=sum(updated[j][1]-values[j][1] for j in impacted)
+        return old,updated,gain,broken
+    iterations=0; restarts=0; polished=0; run_best=None
+    def exhausted():
+        return iterations>=control.node_limit or time.monotonic()>=deadline
+    def polish(assignment, values, total):
+        """Greedy single moves until none improves the score; budget-bounded."""
+        nonlocal iterations
+        improved=True
+        while improved:
+            improved=False
+            for v in movable:
+                for letter in alphabet:
+                    if letter==assignment[v]: continue
+                    if exhausted(): return total
+                    control.check("heuristic_search")
+                    iterations+=1; result["stats"]["nodes"]=iterations
+                    moved=propose(assignment,values,v,letter)
+                    if moved is None: continue
+                    old,updated,gain,broken=moved
+                    if broken==0 and gain>1e-9:
+                        total+=gain; improved=True
+                        for j,value in updated.items(): values[j]=value
+                    else:
+                        for u,l in old.items(): assignment[u]=l
+        return total
     stopped_status = None; stopped_reason = None
     try:
         while iterations<control.node_limit and time.monotonic()<deadline:
@@ -277,43 +324,44 @@ def _global_heuristic(p, slots, base, rules, result, started, deadline, control)
                 if v not in numbered: assignment[v]=rng.choice(alphabet)
             values=[evaluate(j,assignment) for j in range(len(slot_vars))]
             total=sum(v[0] for v in values); violations=sum(v[1] for v in values)
-            remember(assignment,total,violations)
+            run_best=None if violations else (total,assignment[:],values[:])
             if not movable: break
             for step in range(1200):
                 result["stats"]["nodes"]=iterations
                 control.check("heuristic_search")
-                if iterations>=control.node_limit or time.monotonic()>=deadline: break
+                if exhausted(): break
                 iterations+=1
                 v=rng.choice(movable); letter=rng.choice(alphabet)
                 if letter==assignment[v]: continue
-                changes={v:letter}
-                if v in numbered and rules['uniqueLetters']:
-                    owner=next((u for u in numbered if assignment[u]==letter),None)
-                    if owner in fixed: continue
-                    if owner is not None: changes[owner]=assignment[v]
-                old={u:assignment[u] for u in changes}
-                impacted=set().union(*(affected[u] for u in changes))
-                for u,l in changes.items(): assignment[u]=l
-                updated={j:evaluate(j,assignment) for j in impacted}
-                next_total=total+sum(updated[j][0]-values[j][0] for j in impacted)
-                next_violations=violations+sum(updated[j][1]-values[j][1] for j in impacted)
+                moved=propose(assignment,values,v,letter)
+                if moved is None: continue
+                old,updated,gain,broken=moved
+                next_total=total+gain; next_violations=violations+broken
                 delta=next_total-total-1000*(next_violations-violations)
                 temperature=0.3+5*(1-step/1200)
                 if delta>=0 or rng.random()<math.exp(max(-700,delta/temperature)):
                     total=next_total; violations=next_violations
                     for j,value in updated.items(): values[j]=value
-                    remember(assignment,total,violations)
+                    if not violations and (run_best is None or total>run_best[0]):
+                        run_best=(total,assignment[:],values[:])
                 else:
                     for u,l in old.items(): assignment[u]=l
+            if run_best:
+                best_assignment=run_best[1][:]
+                score=polish(best_assignment,run_best[2][:],run_best[0])
+                polished+=score>run_best[0]+1e-9
+                keep(best_assignment,score); run_best=None
             restarts+=1
     except _Stopped as stopped:
         stopped_status = stopped.status; stopped_reason = stopped.reason
+    # A run cut short by the budget or cancellation keeps its best state unpolished.
+    if run_best: keep(run_best[1],run_best[0])
     for assignment,score in sorted(solutions.items(),key=lambda item:-item[1]):
         letters=['']*len(p['cells'])
         for i,v in cell_var.items(): letters[i]=assignment[v]
         solution_words=[dict(cells=s['cells'],text=''.join(letters[i] for i in s['cells']),verified=False,source='unverified') for s in slots]
         result['solutions'].append(dict(letters=letters,score=round(score,3),words=solution_words))
-    result['stats'].update(nodes=iterations,restarts=restarts,elapsedSeconds=round(time.monotonic()-started,3),solutionLimit=MAX_SOLUTIONS)
+    result['stats'].update(nodes=iterations,restarts=restarts,polishedRuns=polished,minimumNumbersDifferent=spread,elapsedSeconds=round(time.monotonic()-started,3),solutionLimit=MAX_SOLUTIONS)
     result['wordCandidates']=[dict(cells=s['cells'],direction=s['direction'],candidates=list(dict.fromkeys(solution['words'][j]['text'] for solution in result['solutions'])),partial=s['before'] or s['after'],verified=False) for j,s in enumerate(slots)]
     if stopped_status:
         result['status']=stopped_status; result['stats']['stopReason']=stopped_reason
@@ -477,6 +525,26 @@ def _constraint_search(p, slots, initial, base, rules, result, control, evidence
     previous_supported = result['stats'].get('partialSupportedCells')
     pruned = False; unresolved = False; best_partial = base[:]
     best_partial_rank = (-1, -1)
+    # Keep the MAX_SOLUTIONS best alternatives rather than the first ones found.
+    # Strict domains stay ranked by score, so a slot's first candidate bounds
+    # what it can add; branches that cannot beat the weakest kept alternative
+    # are cut. Optional words make the support count vary, so no bound there.
+    scores = {}
+    def word_score(text):
+        if text not in scores: scores[text] = _score(text, language, rules)
+        return scores[text]
+    def solution_rank(solution): return (solution.get('supportedWords',0), solution['rawScore'])
+    for solution in result['solutions']:
+        solution.setdefault('rawScore', solution['score'])
+    bounded = not optional
+    def cannot_improve(letters, domains):
+        if not bounded or len(result['solutions']) < MAX_SOLUTIONS: return False
+        bound = sum(word_score(domains[j][0]) if j in domains and not all(letters[i] for i in slot['cells'])
+                    else word_score(''.join(letters[i] for i in slot['cells'])) for j, slot in enumerate(slots))
+        if bound > min(solution_rank(s) for s in result['solutions'])[1]: return False
+        result['stats']['moreSolutions'] = True
+        result['stats']['boundPruned'] = result['stats'].get('boundPruned', 0) + 1
+        return True
     def queue(states):
         nonlocal pruned
         available = frontier_limit-len(stack)
@@ -489,6 +557,7 @@ def _constraint_search(p, slots, initial, base, rules, result, control, evidence
         if result['stats']['nodes'] >= control.node_limit: raise _Stopped('budget_exhausted', 'node_limit')
         letters, domains = stack.pop()
         result['stats']['nodes'] += 1
+        if cannot_improve(letters, domains): continue
         propagated = _domain_propagation(p, slots, domains, letters, rules, control, optional)
         if propagated is None:
             if not optional:
@@ -497,6 +566,7 @@ def _constraint_search(p, slots, initial, base, rules, result, control, evidence
                 best_partial_rank=(-1,-1)
             continue
         letters, domains = propagated
+        if cannot_improve(letters, domains): continue
         supported_cells = set()
         for j, slot in enumerate(slots):
             text = ''.join(letters[i] or '?' for i in slot['cells'])
@@ -551,12 +621,12 @@ def _constraint_search(p, slots, initial, base, rules, result, control, evidence
                 verified = source in ('dictionary', 'morphology')
                 solution_words.append(dict(cells=slot['cells'], text=text, verified=verified, source=source))
             supported = sum(w['verified'] for w in solution_words)
-            score = sum(_score(w['text'], language, rules) for w in solution_words)
-            result['solutions'].append(dict(letters=letters, score=round(score,3),
+            score = sum(word_score(w['text']) for w in solution_words)
+            result['solutions'].append(dict(letters=letters, score=round(score,3), rawScore=score,
                                             supportedWords=supported, words=solution_words))
-        if len(result['solutions']) >= MAX_SOLUTIONS:
-            result['stats']['solutionLimitReached'] = bool(stack)
-            break
+            if len(result['solutions']) > MAX_SOLUTIONS:
+                result['solutions'].remove(min(result['solutions'], key=solution_rank))
+                result['stats']['moreSolutions'] = True
     if pruned:
         result['diagnostics'].append('Queued search states reached the memory budget. Some alternatives were pruned; search is not exhaustive.')
     if unresolved:
@@ -569,7 +639,7 @@ def _constraint_search(p, slots, initial, base, rules, result, control, evidence
         else: result['partialLetters']=previous_partial
         if previous_supported is None: result['stats'].pop('partialSupportedCells',None)
         else: result['stats']['partialSupportedCells']=previous_supported
-    return not pruned and not result['stats'].get('solutionLimitReached') and not optional
+    return not pruned and not optional
 
 
 def _missing_word_search(p, slots, domains, evidence, base, rules, result, control):
@@ -926,10 +996,7 @@ def _solve(puzzle, words, *, morphology=None, cancel=None, progress=None, models
                     if word['source']=='morphology': word['analyses'] = details.get(word['text'],[])
         if not result['solutions'] and not optional and any(not d for d in domains):
             result['stats']['stopReason']='no_candidates'
-        if result['stats'].get('solutionLimitReached'):
-            result['stats']['stopReason']='solution_limit'
-            result['diagnostics'].append('Search stopped at the alternative limit; additional solutions may exist.')
-        if result['solutions']: result['status'] = 'budget_exhausted' if (result['stats'].get('budgetReached') or result['stats'].get('solutionLimitReached')) else 'solutions_found'
+        if result['solutions']: result['status'] = 'budget_exhausted' if result['stats'].get('budgetReached') else 'solutions_found'
         else: result['diagnostics'].append('No solution found in the searched candidates. Check transcription, rules, open endpoints, and dictionary coverage; this is not proof the puzzle is impossible.')
         result['diagnostics'].append('Alternatives are ranked within the searched candidates; the highest-scoring global solution is not guaranteed.')
     except _Stopped as stopped:
@@ -941,6 +1008,12 @@ def _solve(puzzle, words, *, morphology=None, cancel=None, progress=None, models
         else: result['diagnostics'].append('Search was cancelled; any returned suggestions are provisional.')
     finally:
         if result['stats']['limitsReached']: result['stats']['exhaustive']=False
+        for solution in result['solutions']: solution.pop('rawScore', None)
+        if result['stats'].get('moreSolutions') and result['solutions']:
+            result['diagnostics'].append(
+                f'More than {MAX_SOLUTIONS} solutions fit the searched candidates; these are the {MAX_SOLUTIONS} highest-scoring.'
+                if result['stats']['exhaustive'] else
+                f'More than {MAX_SOLUTIONS} solutions were found; these are the {MAX_SOLUTIONS} highest-scoring found before the search stopped.')
         result['solutions'].sort(key=lambda s:(-s.get('supportedWords',0),-s['score']))
         if result.get('partialLetters') and not result['solutions'] and not any('unresolved' in d for d in result['diagnostics']):
             result['diagnostics'].append('Partial letters are provisional search hypotheses; unknown-word cells remain unresolved and these are not forced deductions.')

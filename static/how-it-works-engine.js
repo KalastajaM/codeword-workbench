@@ -5,7 +5,7 @@ function slotsOf(p){const S=[];for(const dir of ['Across','Down']){const lines=[
   for(const line of lines){let seg=[];for(const i of [...line,null]){if(i!==null&&!p.cells[i].black){seg.push(i);continue}if(seg.length>=2)S.push({cells:seg,dir});seg=[]}}}
   return S}
 function shape(items){const m=new Map();return items.map(x=>{if(!m.has(x))m.set(x,m.size);return m.get(x)}).join(',')}
-function solve(p,words,score){
+function solve(p,words,score,limit=12){
   const cells=p.cells,slots=slotsOf(p),trace=[];let rounds=0;
   const num=i=>cells[i].number;
   const label=j=>`${slots[j].dir} r${Math.floor(slots[j].cells[0]/p.cols)+1}c${slots[j].cells[0]%p.cols+1}`;
@@ -37,19 +37,31 @@ function solve(p,words,score){
       const support={};for(const n in sup)support[n]=[...sup[n]].sort().join('');
       trace.push({type:'propagate',depth,round,letters:L.slice(),domains:D.map(d=>d&&d.slice()),removed,newly,support,changed});
       if(!changed)return {L,D}}}
-  const stack=[{L:base.slice(),D:info.map(d=>d.kept),depth:0,id:0,parent:null}];const sols=[];let nodes=0,nextId=1;
+  // Keeps the `limit` highest-scoring solutions; a branch whose best possible
+  // score (each open slot's top candidate) cannot beat the weakest is cut.
+  const wordScore=w=>score[w]??0,total=L=>slots.reduce((a,s)=>a+wordScore(s.cells.map(i=>L[i]).join('')),0);
+  const cut=(L,D)=>{if(sols.length<limit)return false;
+    const bound=slots.reduce((a,s,j)=>a+(D[j]&&!s.cells.every(i=>L[i])?wordScore(D[j][0]):wordScore(s.cells.map(i=>L[i]).join(''))),0);
+    return bound<=Math.min(...sols.map(x=>x.score))};
+  const bounded=(st,L,D)=>{trace.push({type:'bound',depth:st.depth,node:st.id,letters:L.slice(),domains:D,removed:slots.map(()=>[])})};
+  const stack=[{L:base.slice(),D:info.map(d=>d.kept),depth:0,id:0,parent:null}];const sols=[];let nodes=0,nextId=1,found=0;
   while(stack.length){const st=stack.pop();nodes++;
     if(st.via)trace.push({type:'branch',depth:st.depth,node:st.id,slot:st.via.slot,word:st.via.word,letters:st.L.slice(),domains:st.D,removed:slots.map(()=>[])});
+    if(cut(st.L,st.D)){bounded(st,st.L,st.D);continue}
     const r=propagate(st.L,st.D,st.depth);
     if(r.fail){trace.push({type:'dead',depth:st.depth,node:st.id,reason:r.fail,slot:r.slot,letters:r.L.slice(),domains:r.D,removed:r.removed});continue}
-    let {L,D}=r;const filled=D.map((d,j)=>!!d&&slots[j].cells.every(i=>L[i]));D=D.map((d,j)=>filled[j]?null:d);
+    let {L,D}=r;
+    if(cut(L,D)){bounded(st,L,D);continue}const filled=D.map((d,j)=>!!d&&slots[j].cells.every(i=>L[i]));D=D.map((d,j)=>filled[j]?null:d);
     const open=D.map((d,j)=>d?j:-1).filter(j=>j>=0);
     if(open.length){const best=open.sort((a,b)=>D[a].length-D[b].length||slots[b].cells.length-slots[a].cells.length||a-b)[0];
       const rest=D.map((d,j)=>j===best?null:d);
       const kids=D[best].map(w=>{const T=L.slice();slots[best].cells.forEach((i,q)=>T[i]=w[q]);return {L:T,D:rest,depth:st.depth+1,id:nextId++,parent:st.id,via:{slot:best,word:w}}});
       trace.push({type:'choose',depth:st.depth,node:st.id,slot:best,options:D[best].slice(),letters:L.slice(),domains:D,removed:slots.map(()=>[]),kids:kids.map(k=>({id:k.id,word:k.via.word}))});
       stack.push(...kids.slice().reverse());continue}
-    sols.push(L);trace.push({type:'solution',depth:st.depth,node:st.id,letters:L.slice(),index:sols.length,domains:D,removed:slots.map(()=>[])})}
-  trace.push({type:'done',nodes,rounds,solutions:sols.length,letters:sols[0]||base,domains:info.map(()=>null),removed:slots.map(()=>[])});
-  return {slots,trace,sols,nodes,rounds}}
+    sols.push({L,score:total(L)});found++;
+    if(sols.length>limit){let w=0;sols.forEach((x,k)=>{if(x.score<sols[w].score)w=k});sols.splice(w,1)}
+    trace.push({type:'solution',depth:st.depth,node:st.id,letters:L.slice(),index:found,domains:D,removed:slots.map(()=>[])})}
+  sols.sort((a,b)=>b.score-a.score);
+  trace.push({type:'done',nodes,rounds,solutions:sols.length,letters:sols[0]?sols[0].L:base,domains:info.map(()=>null),removed:slots.map(()=>[])});
+  return {slots,trace,sols:sols.map(x=>x.L),nodes,rounds}}
 if(typeof module!=='undefined')module.exports={solve,slotsOf};
