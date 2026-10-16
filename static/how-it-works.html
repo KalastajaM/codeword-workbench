@@ -118,7 +118,7 @@ ul{margin:0;padding-left:20px;display:grid;gap:6px;max-width:68ch}
   <span class="eyebrow">1 · Pipeline</span>
   <h2 id="pipe">From grid to ranked alternatives</h2>
   <div class="flow">
-    <div class="stage"><b>Validate the puzzle</b><small>Grid size, numbers 1–999, one letter per cell from the alphabet, and confirmed letters that respect the mapping rules, ruled-out letters and forbidden patterns. A conflict stops here.</small><span class="fn">validate()</span></div>
+    <div class="stage"><b>Validate the puzzle</b><small>Grid size, numbers 1–<span data-fact="maxCellNumber">99</span>, one letter per cell from the alphabet, and confirmed letters that respect the mapping rules, ruled-out letters and forbidden patterns. A conflict stops here.</small><span class="fn">validate()</span></div>
     <div class="down"></div>
     <div class="stage"><b>Spread confirmed mappings</b><small>A confirmed letter on number 7 fills every other cell numbered 7. These forced letters are reported even when no full solution is found.</small><span class="fn">_propagate()</span></div>
     <div class="down"></div>
@@ -128,12 +128,12 @@ ul{margin:0;padding-left:20px;display:grid;gap:6px;max-width:68ch}
       <div class="lane" data-k="strict">
         <span class="cond">Use dictionary on</span>
         <div class="stage"><b>Index the word list</b><small>Keeps only lengths the grid needs, then buckets words by length and by repeated-letter pattern. A slot numbered 4 9 9 4 only sees words shaped ABBA.</small><span class="fn">WordIndex</span></div>
-        <div class="stage"><b>Collect candidates per slot</b><small>Words compatible with confirmed letters and mappings, plus Finnish inflected forms when enabled. Ranked by the letter model; the top 500 enter strict search.</small><span class="fn">index.candidates()</span></div>
-        <div class="stage"><b>Strict constraint search</b><small>Propagate crossings and shared numbers to a fixed point, branch on the slot with the fewest candidates, backtrack on contradictions. Stops at 12 alternatives.</small><span class="fn">_constraint_search()</span></div>
+        <div class="stage"><b>Collect candidates per slot</b><small>Words compatible with confirmed letters and mappings, plus Finnish inflected forms when enabled. Ranked by the letter model; the top <span data-fact="MAX_CANDIDATES">500</span> enter strict search.</small><span class="fn">index.candidates()</span></div>
+        <div class="stage"><b>Strict constraint search</b><small>Propagate crossings and shared numbers to a fixed point, branch on the slot with the fewest candidates, backtrack on contradictions. Stops at <span data-fact="MAX_SOLUTIONS">12</span> alternatives.</small><span class="fn">_constraint_search()</span></div>
       </div>
       <div class="lane" data-k="missing">
         <span class="cond">Allow missing words on, strict search found nothing</span>
-        <div class="stage"><b>Strict search gets a fifth</b><small>Strict search runs with 20% of the time and nodes, so the fallback keeps most of the budget.</small><span class="fn">_solve()</span></div>
+        <div class="stage"><b>Strict search gets a fifth</b><small>Strict search runs with <span data-fact="strictSharePercent">20</span>% of the time and nodes, so the fallback keeps most of the budget.</small><span class="fn">_solve()</span></div>
         <div class="stage"><b>Missing-word branch and bound</b><small>Each slot either takes a listed word or is left unsupported at a cost of one. The search minimises that cost. Unsupported words get letters only from crossings and mappings.</small><span class="fn">_missing_word_search()</span></div>
       </div>
       <div class="lane" data-k="anneal">
@@ -149,7 +149,7 @@ ul{margin:0;padding-left:20px;display:grid;gap:6px;max-width:68ch}
 <section aria-labelledby="step">
   <span class="eyebrow">2 · Strict search, step by step</span>
   <h2 id="step">Watch propagation and backtracking</h2>
-  <p>A 3 × 3 codeword with five numbers, solved against the app's bundled English demonstration list (30 three-letter words). Candidates are tried in the order the real solver uses: highest letter-model score first. Click a cell to confirm or release its letter and the search reruns.</p>
+  <p>A 3 × 3 codeword with five numbers, solved against the app's bundled English demonstration list (<span data-fact="demoThreeLetterWords">30</span> three-letter words). Candidates are tried in the order the real solver uses: highest letter-model score first. Click a cell to confirm or release its letter and the search reruns.</p>
   <div class="sheet bench">
     <div class="left">
       <div class="grid" id="grid" role="group" aria-label="Puzzle grid"></div>
@@ -187,9 +187,9 @@ ul{margin:0;padding-left:20px;display:grid;gap:6px;max-width:68ch}
       <p>Printed puzzles contain names and brands no list covers. Here every slot has an extra option, “no listed word”, which costs one. Search keeps a cap on that cost and widens or tightens it in phases.</p>
       <svg class="chart" id="capchart" viewBox="0 0 420 190" role="img" aria-label="Schematic of the unsupported-word cap over successive search phases"></svg>
       <ul>
-        <li>Starts with a cap of one unsupported word. With no hypothesis after a node slice, the cap grows to max(cap + 1, ⌊1.5 × cap⌋).</li>
+        <li>Starts with a cap of one unsupported word. With no hypothesis after a node slice, the cap grows to max(cap + 1, ⌊<span data-fact="capGrowth">1.5</span> × cap⌋).</li>
         <li>Each improvement restarts from the root with a cap one below the best cost found.</li>
-        <li>With no hypothesis by the last quarter of the budget, an uncapped dive guarantees some answer.</li>
+        <li>With no hypothesis by the last <span data-fact="diveShare">quarter</span> of the budget, an uncapped dive guarantees some answer.</li>
         <li>Words are tried least-constraining first: letters that many crossing candidates share.</li>
       </ul>
     </div>
@@ -198,9 +198,9 @@ ul{margin:0;padding-left:20px;display:grid;gap:6px;max-width:68ch}
       <p>Without a word list, the solver optimises the number-to-letter mapping itself. A move gives one number a new letter; under unique letters the number that held it swaps. Only slots touching the changed numbers are rescored.</p>
       <svg class="chart" id="annealchart" viewBox="0 0 420 190" role="img" aria-label="Temperature and acceptance probability over one 1200-step annealing run"></svg>
       <ul>
-        <li>Temperature falls linearly from 5.3 to 0.3 over each 1,200-step run; a worse move is accepted with probability e<sup>Δ/T</sup>.</li>
-        <li>Each hard-rule violation (forbidden pattern, ruled-out letter, rejected word) costs 1,000 points, so they are repaired, never returned.</li>
-        <li>Runs restart with a shuffled alphabet and a fixed seed, keeping the 12 best distinct mappings.</li>
+        <li>Temperature falls linearly from <span data-fact="tempStart">5.3</span> to <span data-fact="tempEnd">0.3</span> over each <span data-fact="annealSteps">1,200</span>-step run; a worse move is accepted with probability e<sup>Δ/T</sup>.</li>
+        <li>Each hard-rule violation (forbidden pattern, ruled-out letter, rejected word) costs <span data-fact="violationPenalty">1,000</span> points, so they are repaired, never returned.</li>
+        <li>Runs restart with a shuffled alphabet and a fixed seed, keeping the <span data-fact="MAX_SOLUTIONS">12</span> best distinct mappings.</li>
       </ul>
     </div>
   </div>
@@ -214,13 +214,13 @@ ul{margin:0;padding-left:20px;display:grid;gap:6px;max-width:68ch}
     <table>
       <thead><tr><th>Mode</th><th style="text-align:right">Time</th><th style="text-align:right">Search nodes</th></tr></thead>
       <tbody>
-        <tr><td>Quick</td><td class="num">4 s</td><td class="num">30,000</td></tr>
-        <tr><td>Deep</td><td class="num">60 s</td><td class="num">1,000,000</td></tr>
-        <tr><td>Extended</td><td class="num">300 s</td><td class="num">5,000,000</td></tr>
+        <tr><td>Quick</td><td class="num"><span data-fact="MAX_SECONDS">4</span> s</td><td class="num"><span data-fact="MAX_NODES">30,000</span></td></tr>
+        <tr><td>Deep</td><td class="num"><span data-fact="DEEP_SECONDS">60</span> s</td><td class="num"><span data-fact="DEEP_NODES">1,000,000</span></td></tr>
+        <tr><td>Extended</td><td class="num"><span data-fact="EXTENDED_SECONDS">300</span> s</td><td class="num"><span data-fact="EXTENDED_NODES">5,000,000</span></td></tr>
       </tbody>
     </table>
   </div>
-  <p class="note">Fixed in every mode: 500 ranked candidates per slot in strict search, 20,000 kept for missing-word search, 20,000 fragments per open slot, 12 alternatives, and a queue of about 200,000 cells of pending states (for example 2,469 states on a 9 × 9 grid). A search that finds nothing is not proof the puzzle is impossible.</p>
+  <p class="note">Fixed in every mode: <span data-fact="MAX_CANDIDATES">500</span> ranked candidates per slot in strict search, <span data-fact="MISSING_WORD_CANDIDATES">20,000</span> kept for missing-word search, <span data-fact="MAX_FRAGMENTS">20,000</span> fragments per open slot, <span data-fact="MAX_SOLUTIONS">12</span> alternatives, and a queue of about <span data-fact="MAX_FRONTIER_CELLS">200,000</span> cells of pending states (for example <span data-fact="frontier9x9">2,469</span> states on a 9 × 9 grid). A search that finds nothing is not proof the puzzle is impossible.</p>
 </section>
 </main>
 
