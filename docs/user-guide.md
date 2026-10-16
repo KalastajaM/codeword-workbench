@@ -6,6 +6,8 @@ Installation is in the [README](../README.md). Word lists are covered in [dictio
 
 Select **Try a small example**, then **Solve puzzle**. The example deliberately permits alternative solutions. Suggestions appear in teal; confirmed letters have a solid style. Select an alternative and accept a cell, the selected across/down word, or the full suggestion.
 
+**How codeword solving works** (next to **Try a small example**) opens a page in a new tab that shows the solving stages and steps through a strict search on a small example. You can confirm or release letters in its example grid to see how the search changes. The page is `static/how-it-works.html`; it uses no server data and also opens directly from the file.
+
 To create your own puzzle:
 
 1. Choose a language. For a drawn puzzle, set dimensions and choose **Create new grid**. For a screenshot, add the image directly; the app detects the main grid and updates dimensions.

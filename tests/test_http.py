@@ -56,6 +56,16 @@ class HTTPTests(unittest.TestCase):
         listed = [item for item in self.request('/api/puzzles')[1]['puzzles'] if item['id'] == saved['id']]
         self.assertEqual(listed[0]['language'], 'en')
 
+    def test_how_it_works_page_is_served(self):
+        conn = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=15)
+        for path in ('/how-it-works.html', '/how-it-works.js', '/how-it-works-engine.js'):
+            conn.request('GET', path)
+            response = conn.getresponse(); body = response.read()
+            self.assertEqual(response.status, 200, path)
+            self.assertIn("script-src 'self'", response.getheader('Content-Security-Policy'))
+        conn.close()
+        self.assertIn(b'how-it-works.html', Path('static/index.html').read_bytes())
+
     def test_word_list_import_filters_and_reports_without_rewriting_words(self):
         code, result = self.request('/api/dictionaries/en/import', {
             'text': '\ufeffcat\nCAT\ndog\n10-point\n1080\ncan\'t\n\n'})
