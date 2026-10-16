@@ -223,6 +223,21 @@ class GridDetectionTests(unittest.TestCase):
         cells[0]['number'] = '9'
         self.assertEqual(_mapping_key_cells(cells, 8, 12), set())
 
+    def test_cells_beside_a_zigzag_picture_edge_stay_playable(self):
+        # The picture covers columns 0-2 of rows 0-3, and column 3 in rows 0 and 2;
+        # the bordered cells at (1, 3) and (3, 3) are real cells.
+        image = Image.new('RGB', (361, 361), 'white')
+        draw = ImageDraw.Draw(image)
+        for x in range(0, 361, 60):
+            draw.line((x, 0, x, 360), fill='black', width=2)
+        for y in range(0, 361, 60):
+            draw.line((0, y, 360, y), fill='black', width=2)
+        draw.rectangle((2, 2, 178, 238), fill='white')
+        draw.rectangle((178, 2, 238, 58), fill='white')
+        draw.rectangle((178, 122, 238, 178), fill='white')
+        clues = missing_grid_regions(image, 6, 6, dict(x=0, y=0, width=360/361, height=360/361))
+        self.assertEqual(clues, {r*6+c for r in range(4) for c in range(3)} | {3, 15})
+
     def test_textured_blocks_do_not_expand_over_numbered_cells(self):
         image = Image.new('RGB', (601, 601), 'white')
         rng = random.Random(17)

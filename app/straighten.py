@@ -11,6 +11,8 @@ CORNER_NAMES = ('topLeft', 'topRight', 'bottomRight', 'bottomLeft')
 EDGES = {'top': ('topLeft', 'topRight'), 'right': ('topRight', 'bottomRight'),
          'bottom': ('bottomLeft', 'bottomRight'), 'left': ('topLeft', 'bottomLeft')}
 MAX_EDGE_POINTS = 8
+# A photo often cuts off a corner of the grid; its handle may sit just outside.
+OUTSIDE = .06
 MAX_SIDE = 2000
 MESH_TILES = 40
 # Keep some of the photo around the outline so its border strokes stay whole.
@@ -23,8 +25,8 @@ def _point(value, width, height):
         x, y = float(value['x']), float(value['y'])
     except (KeyError, TypeError, ValueError):
         raise ValueError('Each straightening handle needs x and y fractions.') from None
-    if not (math.isfinite(x) and math.isfinite(y)) or not (0 <= x <= 1 and 0 <= y <= 1):
-        raise ValueError('Straightening handles must lie inside the image.')
+    if not (math.isfinite(x) and math.isfinite(y)) or not (-OUTSIDE <= x <= 1 + OUTSIDE and -OUTSIDE <= y <= 1 + OUTSIDE):
+        raise ValueError('Straightening handles must lie on the image or just outside it.')
     return x * width, y * height
 
 
@@ -393,6 +395,86 @@ def _smooth_line(samples, pitch):
     return knots or points
 
 
+def _cross(line, crossing, guess):
+    """Where a line meets a crossing line: (position along the line, position across it)."""
+    across = _curve(line, guess)
+    along = guess
+    for _ in range(4):
+        along = _curve(crossing, across)
+        across = _curve(line, along)
+    return along, across
+
+
+def _track(lines, crossing, mask, pitch, vertical):
+    """Follow each line cell by cell, so a page wave between bands is not cut off.
+
+    Each cell side is searched for a stroke that spans most of the side;
+    digits and specks span far less. Tracking starts from the longest run of
+    sides that agree with each other and steps outwards, predicting each side
+    from the one before, so a band fit that strayed to a neighbouring stroke
+    does not drag the line along. Sides inside blocks show no stroke and keep
+    the prediction.
+    """
+    pixels, (width, height) = mask.load(), mask.size
+    reach = round(.3 * pitch)
+
+    def inked(along, across):
+        x, y = (across, along) if vertical else (along, across)
+        return 0 <= x < width and 0 <= y < height and pixels[x, y] > 0
+
+    def measure(side, expected):
+        """Offset of the stroke from `expected` along one cell side, or None."""
+        (a0, c0), (a1, c1) = side
+        shift = expected - (c0 + c1) / 2
+        # Sample the inner part of the side, away from the crossing strokes.
+        steps = [(round(a0 + (a1-a0)*t/10), c0 + (c1-c0)*t/10 + shift) for t in range(2, 9)]
+        hits = {offset: sum(inked(along, round(across) + offset) for along, across in steps)
+                for offset in range(-reach, reach + 1)}
+        best = max(hits.values())
+        if best < .7 * len(steps):
+            return None
+        # The stroke mask is thickened: take the centre of the strongest run.
+        peak = min((offset for offset in hits if hits[offset] == best), key=abs)
+        run = [peak]
+        for step in (-1, 1):
+            offset = peak + step
+            while offset in hits and hits[offset] >= best - 1:
+                run.append(offset)
+                offset += step
+        return expected + sum(run) / len(run)
+    tracked = []
+    for line in lines:
+        middle = (line[0][0] + line[-1][0]) / 2
+        ends = [_cross(line, other, middle) for other in crossing]
+        sides = list(zip(ends, ends[1:]))
+        estimate = [(c0 + c1) / 2 for (_, c0), (_, c1) in sides]
+        found = [measure(side, guess) for side, guess in zip(sides, estimate)]
+        # Seed with the longest run of consecutive sides that agree.
+        best_run, run = (0, 0), None
+        for i, position in enumerate(found):
+            if position is not None and run is not None and abs(position - found[i-1] - (estimate[i] - estimate[i-1])) <= .12*pitch:
+                run = (run[0], i)
+            else:
+                run = (i, i) if position is not None else None
+            if run and run[1] - run[0] > best_run[1] - best_run[0]:
+                best_run = run
+        if found[best_run[0]] is None or best_run[1] - best_run[0] < 2:
+            tracked.append(line)
+            continue
+        positions = dict((i, found[i]) for i in range(best_run[0], best_run[1] + 1))
+        measured = set(positions)
+        for order in (range(best_run[1] + 1, len(sides)), range(best_run[0] - 1, -1, -1)):
+            for i in order:
+                previous = i - 1 if i > best_run[1] else i + 1
+                expected = positions[previous] + estimate[i] - estimate[previous]
+                position = measure(sides[i], expected)
+                positions[i] = expected if position is None else position
+                if position is not None:
+                    measured.add(i)
+        tracked.append([((a0 + a1) / 2, positions[i]) for i, ((a0, _), (a1, _)) in enumerate(sides) if i in measured])
+    return tracked
+
+
 def regularize(image):
     """Remap measured, unevenly spaced grid lines onto an even grid.
 
@@ -407,6 +489,12 @@ def regularize(image):
     if columns is None or rows is None:
         return None
     cols, row_count = len(columns) - 1, len(rows) - 1
+    # The band fit only bends lines at band centres; follow each one cell by cell.
+    cell_width, cell_height = gray.width / ((1 + 2*MARGIN) * cols), gray.height / ((1 + 2*MARGIN) * row_count)
+    vertical_mask, horizontal_mask = _stroke_mask(gray, True), _stroke_mask(gray, False)
+    for _ in range(2):
+        columns = _track(columns, rows, vertical_mask, cell_width, True)
+        rows = _track(rows, columns, horizontal_mask, cell_height, False)
 
     def column_at(k, y):
         return _curve(columns[k], y*scale) / scale

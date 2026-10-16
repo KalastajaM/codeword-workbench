@@ -227,5 +227,9 @@ def missing_grid_regions(image, rows, cols, bounds, key_cells=frozenset(), edges
         # Leave manual grids playable when their strokes fall below our contrast threshold.
         enclosed_key = {i for i in key_cells if r0 <= i//cols <= r1 and c0 <= i%cols <= c1}
         if area < rows*cols and r1 > r0 and c1 > c0 and len(component | enclosed_key) >= area*.65:
-            clues.update(r*cols+c for r in range(r0, r1+1) for c in range(c0, c1+1))
+            # A picture edge can zigzag around real cells; a cell that only the
+            # rectangle fill reaches and that has all four borders is one of them.
+            clues.update(r*cols+c for r in range(r0, r1+1) for c in range(c0, c1+1)
+                         if r*cols+c in component or not (vertical[r, c] and vertical[r, c+1]
+                                                          and horizontal[r, c] and horizontal[r+1, c]))
     return clues

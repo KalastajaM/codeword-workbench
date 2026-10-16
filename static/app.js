@@ -333,7 +333,8 @@ function updateView(){
  const bounds=puzzle.imageBounds||{width:1};
  const baseWidth=puzzle.image?puzzle.cols*46/bounds.width:puzzle.cols*47+3;
  const ratio=puzzle.image?(image.naturalWidth?image.naturalHeight/image.naturalWidth:1):(puzzle.rows*47+3)/baseWidth;
- const availableWidth=Math.max(1,viewport.clientWidth-22),availableHeight=Math.max(120,Math.min(window.innerHeight*.78-42,window.innerHeight-Math.max(0,viewport.getBoundingClientRect().top)-60));
+ // While straightening, leave room around the photo for handles placed just outside it.
+ const room=straightenHandles?80:0,availableWidth=Math.max(1,viewport.clientWidth-22-room),availableHeight=Math.max(120,Math.min(window.innerHeight*.78-42,window.innerHeight-Math.max(0,viewport.getBoundingClientRect().top)-60)-room);
  if(fitMode)viewScale=PuzzleState.fitScale(baseWidth,baseWidth*ratio,availableWidth,availableHeight,fitMode);
  if(puzzle.image){stage.style.width=baseWidth*viewScale+'px';stage.style.setProperty('--image-letter-size',Math.max(6,23*viewScale)+'px');stage.style.setProperty('--image-number-size',Math.max(4,10*viewScale)+'px');}
  else{stage.style.width='';stage.style.setProperty('--cell',46*viewScale+'px');stage.style.setProperty('--view-scale',viewScale);}
@@ -624,7 +625,7 @@ $('demo').onclick=async()=>{if((puzzle.image||puzzle.cells.some(c=>c.number||c.l
 function straightenSize(){const image=$('puzzle-image');return [image.naturalWidth||1,image.naturalHeight||1];}
 function renderStraighten(){
  if(!puzzle.image)straightenHandles=null;
- const active=!!straightenHandles;$('board-stage').classList.toggle('straightening',active);$('straighten-overlay').hidden=!active;$('straighten-panel').hidden=!active;$('straighten-photo').hidden=active;
+ const active=!!straightenHandles,was=$('board-stage').classList.contains('straightening');$('board-stage').classList.toggle('straightening',active);if(was!==active)updateView();$('straighten-overlay').hidden=!active;$('straighten-panel').hidden=!active;$('straighten-photo').hidden=active;
  $('straighten-apply').disabled=$('straighten-cancel').disabled=straightenBusy;
  if(!active)return;
  const [width,height]=straightenSize(),paths=Straighten.edgePaths(straightenHandles,width,height);

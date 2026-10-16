@@ -8,7 +8,10 @@
  const EDGE_NAMES = Object.keys(EDGES);
  const EDGE_AT = {top: t => [t, 0], right: t => [1, t], bottom: t => [t, 1], left: t => [0, t]};
  const MAX_EDGE_POINTS = 8, MIN_GAP = .02;
- const clamp = value => Math.min(1, Math.max(0, value));
+ // A photo often cuts off a corner of the grid; its handle may sit just outside.
+ const OUTSIDE = .06;
+ const clamp = value => Math.min(1 + OUTSIDE, Math.max(-OUTSIDE, value));
+ const fraction = value => Math.min(1, Math.max(0, value));
 
  // A slightly inset rectangle with one bend point per edge; earlier automatic alignment of a skewed photo is unreliable.
  function defaultHandles() {
@@ -25,7 +28,7 @@
    if (name !== start && name !== end) continue;
    const a = handles[start], b = handles[end], cx = b.x - a.x, cy = b.y - a.y, length = cx * cx + cy * cy || 1;
    next[edge] = handles[edge].map(p => {
-    const s = clamp(((p.x - a.x) * cx + (p.y - a.y) * cy) / length), weight = name === start ? 1 - s : s;
+    const s = fraction(((p.x - a.x) * cx + (p.y - a.y) * cy) / length), weight = name === start ? 1 - s : s;
     return {x: clamp(p.x + (point.x - old.x) * weight), y: clamp(p.y + (point.y - old.y) * weight)};
    });
   }
@@ -142,7 +145,7 @@
   return {handles: {...handles, [edge]: points}, index: points.indexOf(point)};
  }
 
- const helpers = {CORNERS, EDGE_NAMES, MAX_EDGE_POINTS, defaultHandles, moveCorner, moveEdgePoint, removeEdgePoint, addEdgePoint, surface, edgePaths, outlinePath};
+ const helpers = {OUTSIDE, CORNERS, EDGE_NAMES, MAX_EDGE_POINTS, defaultHandles, moveCorner, moveEdgePoint, removeEdgePoint, addEdgePoint, surface, edgePaths, outlinePath};
  if (typeof module !== 'undefined' && module.exports) module.exports = helpers;
  else root.Straighten = helpers;
 })(typeof window !== 'undefined' ? window : globalThis);

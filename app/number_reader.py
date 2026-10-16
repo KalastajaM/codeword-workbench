@@ -30,7 +30,7 @@ def _binary(gray):
             break
     if background-dark < 60:
         return None
-    threshold = dark+(background-dark)*.55
+    threshold = dark+(background-dark)*.65
     pixels = gray.load()
     return [[pixels[x, y] < threshold for x in range(gray.width)] for y in range(gray.height)]
 
@@ -99,8 +99,16 @@ def number_glyphs(crop, position='top', report=None):
             corner = part['y0'] < height*.3 and part['y1'] < height*.62
         else:
             corner = part['y1'] > height*.7 and part['y0'] > height*.38
+        wide = part['x1']-part['x0']
+        # A short piece of a grid stroke left at the side of a slightly
+        # misaligned crop is a hair-thin upright; even a narrow 1 is wider.
+        sliver = wide <= max(2, tall*.12) and (part['x0'] < width*.15 or part['x1'] > width*.85)
+        # A bent border stroke reaching in from the crop edge is sparse; a
+        # digit cut by the edge still fills much of its box.
+        edge = min(part['x0'], part['y0']) <= 1 or part['x1'] >= width-1 or part['y1'] >= height-1
+        sliver = sliver or edge and len(part['points']) < .2*wide*tall
         # A number is small: well under the cell height, but not a speck.
-        if corner and height*.12 <= tall <= height*.5 and part['x1']-part['x0'] < width*.6:
+        if corner and not sliver and height*.12 <= tall <= height*.5 and wide < width*.6:
             parts.append(part)
     if not parts:
         return []
