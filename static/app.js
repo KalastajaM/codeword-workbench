@@ -28,7 +28,40 @@ $('confirm-dialog').addEventListener('close',()=>{
  if(accepted&&!current)notify('The workspace changed while you were reviewing this action. Please try again.');
  pending.resolve(accepted&&current);
 });
-async function api(path,body,method){const response=await fetch(path,{method:method||(body?'POST':'GET'),headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});const result=await response.json();if(!response.ok)throw new Error(result.error||'Request failed');return result;}
+async function api(path,body,method){const response=await fetch(path,{method:method||(body?'POST':'GET'),headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});const result=await response.json();if(!response.ok){if(response.status===401&&result.signIn&&session.mode!=='signed-out')applySession({...session,mode:'signed-out'});throw new Error(result.error||'Request failed');}return result;}
+// Access level from the server. Guests keep their work in this browser; user
+// mode (shared password) saves puzzles and dictionaries on the server.
+let session={mode:'local'},modeView=PuzzleState.workspaceModeView(session),healthLoaded=false,afterSignIn=null;
+function applySession(info){
+ const changed=info.mode!==session.mode;session=info;modeView=PuzzleState.workspaceModeView(info);
+ $('mode-label').textContent=modeView.label;$('mode-tag').classList.toggle('hosted',modeView.mode!=='local');
+ $('save').hidden=$('load').hidden=!modeView.serverStorage;
+ $('user-mode').hidden=!modeView.modeButton;$('user-mode').textContent=modeView.modeButton||'';
+ $('dictionary-mode-note').hidden=!modeView.dictionaryNote;$('dictionary-mode-note').textContent=modeView.dictionaryNote;
+ if(changed&&typeof dictionaryEditor!=='undefined'){
+  // Another dictionary applies now: drop dictionary checks made with the old one.
+  dictionaryEditor.cancel();$('dictionary-dialog').close();$('load-dialog').close();wordChecks.clear();render();
+ }
+ if(modeView.mode==='signed-out')return openSignIn();
+ loadHealth();if(afterSignIn){const resume=afterSignIn;afterSignIn=null;resume();}
+}
+function openSignIn(){
+ const required=session.mode==='signed-out';
+ $('signin-message').textContent=required?'This workspace needs the access password.':'User mode saves puzzles and dictionaries on the server. Everyone with the password shares them. Your current puzzle stays open.';
+ $('signin-cancel').hidden=required;$('signin-error').textContent='';$('signin-password').value='';
+ if(!$('signin-dialog').open)$('signin-dialog').showModal();$('signin-password').focus();
+}
+$('signin-form').onsubmit=async event=>{event.preventDefault();$('signin-submit').disabled=true;
+ try{const info=await api('/api/login',{password:$('signin-password').value});$('signin-dialog').close();applySession(info);notify('User mode: Save puzzle and dictionary changes now go to the server.');}
+ catch(error){$('signin-error').textContent=error.message;}
+ finally{$('signin-submit').disabled=false;}};
+$('signin-cancel').onclick=()=>$('signin-dialog').close();
+$('signin-dialog').addEventListener('cancel',event=>{if(session.mode==='signed-out')event.preventDefault();});
+$('user-mode').onclick=protect(async()=>{
+ if(session.mode!=='user')return openSignIn();
+ applySession(await api('/api/logout',{}));
+ if(session.mode==='guest')notify('Guest mode: your work stays in this browser. Use Export JSON to keep a copy.');
+});
 function protect(fn){return async(...args)=>{try{await fn(...args);}catch(error){notify(error.message,true);}};}
 function invalidate(){clearCandidateResults();clearLookup();acceptanceHistory.clear();if($('solve-status').textContent)$('solve-status').textContent='Puzzle changed. Solve again for current suggestions.';solveJob.cancel();revision++;delete puzzle.suggestions;PuzzleState.refreshDeductions(puzzle,false);solutionIndex=0;clearTimeout(validateTimer);validateTimer=setTimeout(validate,180);}
 async function validate(){const version=revision;try{const result=await api('/api/validate',puzzle);if(version===revision){$('conflicts').textContent=result.conflicts.join(' · ');eliminationSuggestions=result.valid&&Array.isArray(result.suggestedEliminations)?result.suggestedEliminations:[];renderEliminations();}}catch(error){if(version===revision){$('conflicts').textContent=error.message;eliminationSuggestions=[];renderEliminations();}}}
@@ -442,7 +475,7 @@ $('cancel-solve').onclick=()=>solveJob.requestCancel();
 $('search-mode').onchange=()=>{puzzle.searchMode=$('search-mode').value;invalidate();render();};
 $('allow-unknown-words').onchange=()=>{puzzle.allowUnknownWords=$('allow-unknown-words').checked;invalidate();render();};
 
-$('save').onclick=protect(async()=>{if(storageBusy)return;const version=revision,savedPuzzle=puzzle,savedName=puzzle.name,sent=workspaceFingerprint();setStorageBusy(true);try{const result=await api('/api/puzzles',savedPuzzle);if(puzzle===savedPuzzle){const unchanged=workspaceFingerprint()===sent;puzzle.id=result.id;if(unchanged)savedFingerprint=workspaceFingerprint();}notify(`Saved “${result.name}” locally.`+(puzzle===savedPuzzle&&(version!==revision||puzzle.name!==savedName)?' Newer edits are not saved yet.':''));}finally{setStorageBusy(false);}});$('load').onclick=protect(async()=>{if(storageBusy)return;await refreshSaved();if(!$('load-dialog').open)$('load-dialog').showModal();});
+$('save').onclick=protect(async()=>{if(storageBusy)return;const version=revision,savedPuzzle=puzzle,savedName=puzzle.name,sent=workspaceFingerprint();setStorageBusy(true);try{const result=await api('/api/puzzles',savedPuzzle);if(puzzle===savedPuzzle){const unchanged=workspaceFingerprint()===sent;puzzle.id=result.id;if(unchanged)savedFingerprint=workspaceFingerprint();}notify(`Saved “${result.name}” ${modeView.savedWhere}.`+(puzzle===savedPuzzle&&(version!==revision||puzzle.name!==savedName)?' Newer edits are not saved yet.':''));}finally{setStorageBusy(false);}});$('load').onclick=protect(async()=>{if(storageBusy)return;await refreshSaved();if(!$('load-dialog').open)$('load-dialog').showModal();});
 let renameItem=null;
 let storageBusy=false;
 function setStorageBusy(value){storageBusy=value;$('save').disabled=value;$('load').disabled=value;$('rename-save').disabled=value;for(const button of $('saved-list').querySelectorAll('button'))button.disabled=value;}
@@ -580,7 +613,7 @@ async function searchDictionary(offset=0){const token=++dictionarySearchToken,la
  try{const result=await api(`/api/dictionaries/${language}/search?q=${encodeURIComponent(query)}&status=${status}&offset=${offset}`);if(token!==dictionarySearchToken)return;lastDictionarySearch=result;dictionaryOffset=result.offset;renderDictionaryResults(result);}
  catch(error){if(token===dictionarySearchToken)$('dictionary-search-status').textContent='Search failed: '+error.message;}}
 function renderDictionaryResults(result){const output=$('dictionary-results');output.replaceChildren();
- $('dictionary-source').textContent=`${result.custom?'Custom local dictionary':'Bundled demonstration vocabulary (not comprehensive)'} · ${result.count.toLocaleString('en')} entries, ${result.disabledCount.toLocaleString('en')} disabled.`;
+ $('dictionary-source').textContent=`${result.custom?modeView.customDictionary:'Bundled demonstration vocabulary (not comprehensive)'} · ${result.count.toLocaleString('en')} entries, ${result.disabledCount.toLocaleString('en')} disabled.`;
  $('dictionary-search-status').textContent=PuzzleState.dictionarySearchSummary(result);
  for(const entry of result.words){const row=document.createElement('div');row.className='dictionary-row'+(entry.enabled?'':' disabled');
   const toggle=document.createElement('label');toggle.className='check';const box=document.createElement('input');box.type='checkbox';box.checked=entry.enabled;box.setAttribute('aria-label',(entry.enabled?'Disable ':'Enable ')+entry.word);box.title=entry.enabled?'Enabled: used for solving. Untick to disable.':'Disabled: kept but not used. Tick to enable.';
@@ -615,7 +648,7 @@ $('dictionary-add-words').onkeydown=event=>{if(event.key==='Enter'){event.preven
 $('dictionary-words').oninput=()=>{dictionaryPages.update(dictionaryPage,$('dictionary-words').value);dictionaryEditor.manualEdit();bulkDirty=true;};
 $('dictionary-file').onchange=protect(async event=>{
  const file=event.target.files[0];event.target.value='';if(!file)return;
- if(file.size>16*1024*1024)throw new Error('Word list is too large (maximum 16 MB).');
+ if(file.size>modeView.maxImportBytes)throw new Error(`Word list is too large (maximum ${modeView.maxImportBytes/1024/1024} MB).`);
  const contents=await dictionaryEditor.readFile(()=>file.text());
  if(contents!==null&&$('dictionary-dialog').open)loadDictionaryText(contents);
 });
@@ -689,8 +722,17 @@ $('straighten-apply').onclick=protect(async()=>{
   }catch(error){notify('Photo straightened, but the grid could not be read: '+error.message+' Set rows and columns, apply them to the image, then read the grid again.',true);}
  }finally{straightenBusy=false;renderStraighten();}
 });
-// Autosave: the server keeps one copy of the workspace, so a reload or
-// closed tab never loses work. Explicit Save/Export still name and keep puzzles.
+// Autosave: one recovery copy of the workspace, so a reload or closed tab
+// never loses work. The local app keeps it on the server; hosted mode keeps
+// it in this browser (IndexedDB). Explicit Save/Export still name and keep puzzles.
+const browserAutosave={
+ open(){return new Promise((resolve,reject)=>{const request=indexedDB.open('codeword-workbench',1);request.onupgradeneeded=()=>request.result.createObjectStore('autosave');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error||new Error('Browser storage is unavailable.'));});},
+ async run(mode,action){const db=await this.open();try{return await new Promise((resolve,reject)=>{const tx=db.transaction('autosave',mode),request=action(tx.objectStore('autosave'));tx.oncomplete=()=>resolve(request.result);tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Browser storage failed.'));});}finally{db.close();}},
+ get(){return this.run('readonly',store=>store.get('workspace'));},
+ put(value){return this.run('readwrite',store=>store.put(value,'workspace'));}
+};
+async function readAutosave(){return modeView.autosave==='server'?(await api('/api/autosave')).autosave:(await browserAutosave.get())||null;}
+async function writeAutosave(value,unsaved){if(modeView.autosave==='server')return api('/api/autosave',{puzzle:value,unsaved},'PUT');await browserAutosave.put({puzzle:JSON.parse(JSON.stringify(value)),unsaved,savedAt:new Date().toISOString()});}
 let savedFingerprint='',autosavedFingerprint=null,autosaveBusy=false,autosaveError='';
 function workspaceFingerprint(){return JSON.stringify(puzzle,(key,value)=>key==='image'&&typeof value==='string'?value.length+':'+value.slice(-64):value);}
 function hasUnsavedChanges(){return workspaceFingerprint()!==savedFingerprint;}
@@ -698,20 +740,28 @@ async function autosaveNow(){
  if(autosavedFingerprint===null||autosaveBusy)return;
  const fingerprint=workspaceFingerprint();if(fingerprint===autosavedFingerprint)return;
  autosaveBusy=true;
- try{await api('/api/autosave',{puzzle,unsaved:fingerprint!==savedFingerprint},'PUT');autosavedFingerprint=fingerprint;autosaveError='';}
+ try{await writeAutosave(puzzle,fingerprint!==savedFingerprint);autosavedFingerprint=fingerprint;autosaveError='';}
  catch(error){if(error.message!==autosaveError){autosaveError=error.message;notify('Automatic backup failed: '+error.message+' Save the puzzle to keep your work.',true);}}
  finally{autosaveBusy=false;}
 }
 async function restoreAutosave(){
  const version=revision,initial=puzzle;
  try{
-  const {autosave}=await api('/api/autosave');
+  const autosave=await readAutosave();
   if(autosave&&puzzle===initial&&version===revision){
    const restored=await restorePuzzle(autosave.puzzle);
-   if(puzzle===initial&&version===revision){setPuzzle(restored);if(autosave.unsaved)savedFingerprint='';notify(autosave.unsaved?'Restored your workspace with its unsaved changes. Save it to keep it as a named puzzle.':'Restored your last workspace.');}
+   if(puzzle===initial&&version===revision){setPuzzle(restored);if(autosave.unsaved)savedFingerprint='';notify(autosave.unsaved?'Restored your workspace with its unsaved changes. '+(modeView.serverStorage?'Save it to keep it as a named puzzle.':'Use Export JSON to keep a copy.'):'Restored your last workspace.');return true;}
   }
  }catch(error){notify('Could not restore the automatic backup: '+error.message,true);}
  finally{autosavedFingerprint=workspaceFingerprint();setInterval(autosaveNow,1500);}
 }
 window.addEventListener('beforeunload',event=>{if(hasUnsavedChanges()){event.preventDefault();event.returnValue='';}});
-setPuzzle(fresh());restoreAutosave();api('/api/health').then(data=>{ocrAvailable=data.ocrAvailable;$('ocr-status').textContent=ocrAvailable?'Local OCR available. Recognition can make mistakes.':'OCR is unavailable. Manual image transcription is supported.';}).catch(error=>notify('Could not reach the local server: '+error.message,true));
+function loadHealth(){if(healthLoaded)return;healthLoaded=true;api('/api/health').then(data=>{ocrAvailable=data.ocrAvailable;$('ocr-status').textContent=ocrAvailable?'Local OCR available. Recognition can make mistakes.':'OCR is unavailable. Manual image transcription is supported.';}).catch(error=>{healthLoaded=false;notify('Could not reach the server: '+error.message,true);});}
+async function start(){
+ try{applySession(await api('/api/session'));}catch(error){notify('Could not reach the server: '+error.message,true);}
+ // Restoring rechecks words against the dictionary, which needs access first.
+ if(modeView.mode==='signed-out')await new Promise(resolve=>{afterSignIn=resolve;});
+ const restored=await restoreAutosave();
+ if(modeView.mode==='guest'&&!restored)notify('Guest mode: your work stays in this browser and is not saved on the server. Use Export JSON to keep a copy'+(session.userLogin?', or switch to User mode.':'.'));
+}
+setPuzzle(fresh());start();

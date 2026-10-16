@@ -170,3 +170,4 @@ button.rule-out-group{padding:3px 7px;font-size:11px;background:transparent;colo
 .ruled-out-entry{display:flex;gap:6px}.ruled-out-entry input{margin-top:0!important;width:80px!important;text-transform:uppercase}.ruled-out-entry input::placeholder{text-transform:none}
 #elimination-suggestions.hint{margin:8px 0}#rule-out-all{font-size:12px;padding:7px 10px;margin-top:6px}
 .current-word-rejection{margin:-6px 0 14px;padding:0 12px}.current-word-rejection>button{font-size:12px;padding:6px 10px}
+.local-tag.hosted{display:inline-block}#signin-error{color:#ffd0c9}

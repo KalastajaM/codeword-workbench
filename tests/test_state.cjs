@@ -555,3 +555,19 @@ test('dictionary search summary uses singular for one match', () => {
  const {dictionarySearchSummary}=require('../static/state.js');
  assert.equal(dictionarySearchSummary({total:1,query:'K?TT*',status:'disabled',offset:0,words:[{}]}),'1 disabled word matches K?TT* · showing 1–1');
 });
+test('Workspace mode view keeps guests off server storage and explains their limits', () => {
+ const {workspaceModeView} = require('../static/state.js');
+ const local = workspaceModeView({mode:'local'});
+ assert.equal(local.serverStorage, true); assert.equal(local.autosave, 'server'); assert.equal(local.modeButton, null); assert.equal(local.dictionaryNote, '');
+ const limits = {words:200000, importMegabytes:4, idleHours:2};
+ const guest = workspaceModeView({mode:'guest', userLogin:true, guestLimits:limits});
+ assert.equal(guest.serverStorage, false); assert.equal(guest.autosave, 'browser'); assert.equal(guest.modeButton, 'User mode');
+ assert.equal(guest.maxImportBytes, 4*1024*1024); assert.match(guest.dictionaryNote, /200,000 words and 4 MB/); assert.match(guest.dictionaryNote, /2 hours/);
+ assert.equal(workspaceModeView({mode:'guest', userLogin:false, guestLimits:limits}).modeButton, null, 'No password configured: no user mode');
+ const user = workspaceModeView({mode:'user', userLogin:true});
+ assert.equal(user.serverStorage, true); assert.equal(user.autosave, 'browser', 'Shared servers keep recovery copies per browser');
+ assert.equal(user.modeButton, 'Leave user mode'); assert.equal(user.maxImportBytes, 16*1024*1024);
+ const signedOut = workspaceModeView({mode:'signed-out', userLogin:true});
+ assert.equal(signedOut.serverStorage, false); assert.equal(signedOut.modeButton, null);
+ assert.equal(workspaceModeView({mode:'bogus'}).mode, 'local');
+});

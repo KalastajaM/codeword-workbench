@@ -54,8 +54,8 @@ that convert them to the one-word-per-line import format.
 - [User guide](docs/user-guide.md): every feature, search controls and limits.
 - [Dictionaries](docs/dictionaries.md): sources, conversion, Finnish
   inflected forms, rebuilding the letter models.
-- [Hosted mode](docs/railway.md): opt-in Docker/Railway deployment with an
-  access password.
+- [Hosted mode](docs/railway.md): opt-in Docker/Railway deployment with a
+  guest mode and a password-protected user mode.
 
 ## Project layout
 

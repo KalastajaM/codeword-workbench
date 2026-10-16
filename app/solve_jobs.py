@@ -31,13 +31,16 @@ class SolveJobs:
             if now-job['finished'] > self.retention_seconds or len(self.jobs) >= self.max_retained:
                 del self.jobs[job['id']]
 
-    def start(self, puzzle):
+    def start(self, puzzle, capacity=None, runner=None):
+        """Capacity and runner default to the registry's; callers may narrow them per request."""
+        capacity = capacity or self.capacity
         with self.lock:
             self._prune()
-            if self.closed or len(self.jobs) >= self.max_retained or not self.capacity.acquire(blocking=False):
+            if self.closed or len(self.jobs) >= self.max_retained or not capacity.acquire(blocking=False):
                 raise JobCapacityError('Another solve or recognition is running. Try again shortly.')
             key = uuid.uuid4().hex
             job = dict(id=key, status='running', started=time.monotonic(), cancel=threading.Event(),
+                       capacity=capacity, runner=runner or self.runner,
                        progress=dict(stage='preparing', nodes=0, elapsedSeconds=0, solutionsFound=0))
             self.jobs[key] = job
             # Avoid retaining source images or previous solve results in the worker.
@@ -47,7 +50,7 @@ class SolveJobs:
                 job['thread'].start()
             except Exception:
                 del self.jobs[key]
-                self.capacity.release()
+                capacity.release()
                 raise
             return self._snapshot(job)
 
@@ -57,7 +60,7 @@ class SolveJobs:
                 job['progress'].update(update)
         outcome = {}
         try:
-            result = self.runner(puzzle, cancel=job['cancel'].is_set, progress=progress)
+            result = job['runner'](puzzle, cancel=job['cancel'].is_set, progress=progress)
             outcome['result'] = result
         except Exception:
             traceback.print_exc()
@@ -78,7 +81,7 @@ class SolveJobs:
                 job['progress'].update(stage=job['status'],
                                        elapsedSeconds=round(job['finished']-job['started'],3),
                                        solutionsFound=len((result or {}).get('solutions',[])))
-                self.capacity.release()
+                job['capacity'].release()
 
     def _snapshot(self, job):
         snapshot = {k:job[k] for k in ('id','status','result','error') if k in job}
