@@ -129,7 +129,7 @@ ul{margin:0;padding-left:20px;display:grid;gap:6px;max-width:68ch}
         <span class="cond">Use dictionary on</span>
         <div class="stage"><b>Index the word list</b><small>Keeps only lengths the grid needs, then buckets words by length and by repeated-letter pattern. A slot numbered 4 9 9 4 only sees words shaped ABBA.</small><span class="fn">WordIndex</span></div>
         <div class="stage"><b>Collect candidates per slot</b><small>Words compatible with confirmed letters and mappings, plus Finnish inflected forms when enabled. Ranked by the letter model; the top <span data-fact="MAX_CANDIDATES">500</span> enter strict search.</small><span class="fn">index.candidates()</span></div>
-        <div class="stage"><b>Strict constraint search</b><small>Propagate crossings and shared numbers to a fixed point, branch on the slot with the fewest candidates, backtrack on contradictions. Stops at <span data-fact="MAX_SOLUTIONS">12</span> alternatives.</small><span class="fn">_constraint_search()</span></div>
+        <div class="stage"><b>Strict constraint search</b><small>Propagate crossings and shared numbers to a fixed point, branch on the slot with the fewest candidates, backtrack on contradictions. Keeps the <span data-fact="MAX_SOLUTIONS">12</span> highest-scoring alternatives and skips any branch whose best possible score cannot beat the weakest of them.</small><span class="fn">_constraint_search()</span></div>
       </div>
       <div class="lane" data-k="missing">
         <span class="cond">Allow missing words on, strict search found nothing</span>
@@ -142,7 +142,7 @@ ul{margin:0;padding-left:20px;display:grid;gap:6px;max-width:68ch}
       </div>
     </div>
     <div class="down"></div>
-    <div class="stage"><b>Rank and label</b><small>Alternatives sort by number of dictionary-supported words, then letter-model score. Each word is labelled dictionary, morphology, fragment or unverified, with a Typical / Unusual / Implausible pattern check. Status says whether time, nodes, the alternative limit or exhaustion ended the search.</small><span class="fn">annotate_plausibility()</span></div>
+    <div class="stage"><b>Rank and label</b><small>Alternatives sort by number of dictionary-supported words, then letter-model score. Each word is labelled dictionary, morphology, fragment or unverified, with a Typical / Unusual / Implausible pattern check. Status says whether time, nodes, cancellation or exhaustion ended the search.</small><span class="fn">annotate_plausibility()</span></div>
   </div>
 </section>
 
@@ -200,7 +200,8 @@ ul{margin:0;padding-left:20px;display:grid;gap:6px;max-width:68ch}
       <ul>
         <li>Temperature falls linearly from <span data-fact="tempStart">5.3</span> to <span data-fact="tempEnd">0.3</span> over each <span data-fact="annealSteps">1,200</span>-step run; a worse move is accepted with probability e<sup>Δ/T</sup>.</li>
         <li>Each hard-rule violation (forbidden pattern, ruled-out letter, rejected word) costs <span data-fact="violationPenalty">1,000</span> points, so they are repaired, never returned.</li>
-        <li>Runs restart with a shuffled alphabet and a fixed seed, keeping the <span data-fact="MAX_SOLUTIONS">12</span> best distinct mappings.</li>
+        <li>Runs restart with a shuffled alphabet and a fixed seed. Each run's best mapping is polished with single improving moves until none helps.</li>
+        <li>A polished mapping is kept only if it differs from every kept one in at least <span data-fact="MIN_MAPPING_DISTANCE">3</span> numbers (fewer on tiny grids), so the <span data-fact="MAX_SOLUTIONS">12</span> alternatives are distinct guesses, not one guess with a letter swapped.</li>
       </ul>
     </div>
   </div>

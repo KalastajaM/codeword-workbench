@@ -2,6 +2,7 @@ import time
 import unittest
 from unittest.mock import patch
 from test_solver import puzzle
+from app import solver
 from app.solver import solve
 
 
@@ -185,7 +186,37 @@ class ImprovementsTests(unittest.TestCase):
         self.assertEqual(solve(puzzle(1,2),['AT'])['stats']['stopReason'],'search_exhausted')
         self.assertEqual(solve(puzzle(1,2,[1,1],{0:'A',1:'B'}),['AT'])['stats']['stopReason'],'invalid_constraints')
         with patch('app.solver.MAX_SOLUTIONS',1):
-            self.assertEqual(solve(puzzle(1,2),['AT','TO'])['stats']['stopReason'],'solution_limit')
+            self.assertEqual(solve(puzzle(1,2),['AT','TO'])['stats']['stopReason'],'search_exhausted')
+
+    def test_strict_search_keeps_the_highest_scoring_alternatives(self):
+        words=['AT','TO','IT','IN','ON','AN','NO','SO','AS','IS','US','UP','ME','WE','HE','BE','BY','MY','OF','OR','GO','DO','IF']
+        p=puzzle(2,2,[1,2,3,4])
+        with patch('app.solver.MAX_SOLUTIONS',1000): everything=solve(p,words)
+        self.assertGreater(len(everything['solutions']),3)
+        best=sorted((s['score'] for s in everything['solutions']),reverse=True)[:3]
+        with patch('app.solver.MAX_SOLUTIONS',3): r=solve(p,words)
+        self.assertEqual([s['score'] for s in r['solutions']],best)
+        self.assertEqual(r['stats']['stopReason'],'search_exhausted')
+        self.assertTrue(r['stats']['exhaustive'])
+        self.assertTrue(r['stats']['moreSolutions'])
+        self.assertGreater(r['stats']['boundPruned'],0)
+        self.assertLess(r['stats']['propagationRounds'],everything['stats']['propagationRounds'])
+        self.assertTrue(any('3 highest-scoring' in d for d in r['diagnostics']))
+        self.assertTrue(all('rawScore' not in s for s in r['solutions']))
+
+    def test_dictionary_free_alternatives_are_distinct_local_optima(self):
+        numbers={}; cells=[numbers.setdefault(ch,len(numbers)+1) for ch in 'HEARTEMBERABUSERESINTREND']
+        p=puzzle(5,5,cells,useDictionary=False)
+        with patch('app.solver.MAX_NODES',20000): r=solve(p,[])
+        self.assertGreater(len(r['solutions']),1)
+        spread=r['stats']['minimumNumbersDifferent']
+        self.assertEqual(spread,solver.MIN_MAPPING_DISTANCE)
+        mappings=[{c['number']:l for c,l in zip(p['cells'],s['letters'])} for s in r['solutions']]
+        for i,a in enumerate(mappings):
+            for b in mappings[i+1:]:
+                self.assertGreaterEqual(sum(a[n]!=b[n] for n in a),spread)
+        scores=[s['score'] for s in r['solutions']]
+        self.assertEqual(scores,sorted(scores,reverse=True))
 
     def test_pruning_is_separate_from_stop_reason(self):
         with patch('app.solver.MAX_CANDIDATES',1):

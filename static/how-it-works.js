@@ -10,7 +10,7 @@ let given=new Set([3]);  // number 3 = A confirmed
 let run,step=0,timer=null;
 const $=id=>document.getElementById(id);
 function puzzle(){return {rows:3,cols:3,cells:NUMS.map((n,i)=>({number:n,letter:given.has(n)&&[...ANSWER].findIndex((_,k)=>NUMS[k]===n)===i?ANSWER[i]:''}))}}
-function rerun(){stop();run=solve(puzzle(),WORDS,SCORE);step=0;$('scrub').max=run.trace.length-1;render()}
+function rerun(){stop();run=solve(puzzle(),WORDS,SCORE,SOLUTION_LIMIT);step=0;$('scrub').max=run.trace.length-1;render()}
 const lbl=(s)=>`${s.dir} r${Math.floor(s.cells[0]/3)+1}c${s.cells[0]%3+1}`;
 function cellsText(list){return list.map(i=>`r${Math.floor(i/3)+1}c${i%3+1}`).join(', ')}
 function narrate(t){
@@ -23,7 +23,8 @@ function narrate(t){
     case 'choose':return ['Branch point',`No letter is forced yet. The solver branches on the slot with the fewest candidates (ties go to the longer, then earlier slot): ${lbl(s)}, with ${t.options.length} options tried in score order: ${t.options.join(', ')}.`];
     case 'branch':return ['Try a word',`Place ${t.word} in ${lbl(s)} as a hypothesis, then propagate its consequences.`];
     case 'dead':return ['Contradiction',`Propagation failed: ${t.reason}. This branch is abandoned and the search backtracks to the next queued option.`];
-    case 'solution':return ['Solution',`Every slot holds a listed word and every number has one letter. Recorded as alternative ${t.index}; the search continues until the queue is empty or ${SOLUTION_LIMIT} alternatives are found.`];
+    case 'solution':return ['Solution',`Every slot holds a listed word and every number has one letter. Recorded as alternative ${t.index}. The search continues until the queue is empty, keeping the ${SOLUTION_LIMIT} highest-scoring alternatives.`];
+    case 'bound':return ['Cut by score',`${SOLUTION_LIMIT} alternatives are already kept. Even the best remaining candidate in every open slot could not outscore the weakest of them, so this branch is skipped.`];
     case 'done':return ['Search finished',`The queue is empty after ${t.nodes} search nodes and ${t.rounds} propagation rounds, with ${t.solutions} solution${t.solutions===1?'':'s'}. Nothing was truncated, so for this word list the search is exhaustive.`];
   }}
 function render(){
@@ -66,7 +67,7 @@ function drawTree(seen){
   const nodes={0:{id:0,label:'start',kids:[],depth:0}};
   for(const t of run.trace)if(t.type==='choose')for(const k of t.kids)nodes[k.id]={id:k.id,label:k.word,kids:[],depth:t.depth+1,parent:t.node},nodes[t.node].kids.push(k.id);
   const state={};for(const t of seen){if(t.node==null)continue;
-    if(t.type==='branch')state[t.node]='try';if(t.type==='dead')state[t.node]='dead';if(t.type==='solution')state[t.node]='ok';if(t.type==='choose')state[t.node]='open';if(t.type==='propagate')state[t.node]=state[t.node]||'open'}
+    if(t.type==='branch')state[t.node]='try';if(t.type==='dead'||t.type==='bound')state[t.node]='dead';if(t.type==='solution')state[t.node]='ok';if(t.type==='choose')state[t.node]='open';if(t.type==='propagate')state[t.node]=state[t.node]||'open'}
   state[0]=state[0]||'open';
   const cur=seen[seen.length-1].node;
   let leaf=0;const pos={};
