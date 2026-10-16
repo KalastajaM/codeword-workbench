@@ -64,7 +64,7 @@ function drawTree(seen){
   const nodes={0:{id:0,label:'start',kids:[],depth:0}};
   for(const t of run.trace)if(t.type==='choose')for(const k of t.kids)nodes[k.id]={id:k.id,label:k.word,kids:[],depth:t.depth+1,parent:t.node},nodes[t.node].kids.push(k.id);
   const state={};for(const t of seen){if(t.node==null)continue;
-    if(t.type==='branch')state[t.node]='try';if(t.type==='dead')state[t.node]='dead';if(t.type==='solution')state[t.node]='ok';if(t.type==='choose'||t.type==='propagate')state[t.node]=state[t.node]||'open'}
+    if(t.type==='branch')state[t.node]='try';if(t.type==='dead')state[t.node]='dead';if(t.type==='solution')state[t.node]='ok';if(t.type==='choose')state[t.node]='open';if(t.type==='propagate')state[t.node]=state[t.node]||'open'}
   state[0]=state[0]||'open';
   const cur=seen[seen.length-1].node;
   let leaf=0;const pos={};
@@ -72,7 +72,7 @@ function drawTree(seen){
   const maxD=Math.max(...Object.values(nodes).map(n=>n.depth));const dx=78,dy=58,W=Math.max(320,leaf*dx+20),H=(maxD+1)*dy+16;
   const X=id=>10+dx/2+pos[id]*dx,Y=id=>22+nodes[id].depth*dy;
   const col={try:'var(--focus)',dead:'var(--dead)',ok:'var(--ok)',open:'var(--teal)'};
-  let svg=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Search tree">`;
+  let svg=`<svg viewBox="0 0 ${W} ${H}" style="max-width:${W}px;min-width:${Math.round(W*.6)}px" role="img" aria-label="Search tree">`;
   for(const n of Object.values(nodes))if(n.parent!=null)svg+=`<line x1="${X(n.parent)}" y1="${Y(n.parent)+11}" x2="${X(n.id)}" y2="${Y(n.id)-11}" stroke="var(--rule)" stroke-width="1.5"/>`;
   for(const n of Object.values(nodes)){const s=state[n.id];const c=s?col[s]:'var(--rule)';const fill=s&&s!=='open'?c:'var(--sheet)';
     svg+=`<g><rect x="${X(n.id)-32}" y="${Y(n.id)-11}" width="64" height="22" rx="11" fill="${fill}" stroke="${c}" stroke-width="${n.id===cur?3:1.5}"/>`+
