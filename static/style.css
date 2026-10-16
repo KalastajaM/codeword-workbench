@@ -171,3 +171,4 @@ button.rule-out-group{padding:3px 7px;font-size:11px;background:transparent;colo
 #elimination-suggestions.hint{margin:8px 0}#rule-out-all{font-size:12px;padding:7px 10px;margin-top:6px}
 .current-word-rejection{margin:-6px 0 14px;padding:0 12px}.current-word-rejection>button{font-size:12px;padding:6px 10px}
 .local-tag.hosted{display:inline-block}#signin-error{color:#ffd0c9}
+.saved-filter{display:flex;align-items:center;gap:8px;margin-top:6px}.saved-filter select{width:auto}.saved-language{color:var(--muted);font-size:12px;margin-left:auto;flex:0 0 5.5em;text-align:left}

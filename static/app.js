@@ -495,14 +495,23 @@ let renameItem=null;
 let storageBusy=false;
 function setStorageBusy(value){storageBusy=value;$('save').disabled=value;$('load').disabled=value;$('rename-save').disabled=value;for(const button of $('saved-list').querySelectorAll('button'))button.disabled=value;}
 
+let savedPuzzles=[],savedLanguage='';
 async function refreshSaved(){
  const token=++loadToken,result=await api('/api/puzzles');if(token!==loadToken)return;
- const list=$('saved-list');list.replaceChildren();if(!result.puzzles.length)list.textContent='No saved puzzles yet.';
- result.puzzles.forEach(item=>{
+ savedPuzzles=result.puzzles;renderSaved();
+}
+$('saved-language').onchange=()=>{savedLanguage=$('saved-language').value;renderSaved();};
+function renderSaved(){
+ const view=PuzzleState.savedPuzzleView(savedPuzzles,savedLanguage),filter=$('saved-language');
+ filter.replaceChildren(new Option(`All languages (${savedPuzzles.length})`,''),...view.languages.map(entry=>new Option(`${entry.name} (${entry.count})`,entry.code)));
+ filter.value=view.selected;filter.disabled=view.languages.length<2&&!view.selected;
+ const list=$('saved-list');list.replaceChildren();if(!view.items.length)list.textContent='No saved puzzles yet.';
+ view.items.forEach(item=>{
   const row=document.createElement('div');row.className='saved-row';
   const button=document.createElement('button');button.className='saved-item';
   const name=document.createElement('span');name.textContent=item.name;
-  const date=document.createElement('small');date.textContent=new Date(item.updatedAt).toLocaleDateString();button.append(name,date);
+  const language=document.createElement('span');language.className='saved-language';language.textContent=item.language?PuzzleState.languagePresentation({language:item.language}).name:'';
+  const date=document.createElement('small');date.textContent=new Date(item.updatedAt).toLocaleDateString();button.append(name,language,date);
   button.onclick=protect(async()=>{if(storageBusy)return;if(!await confirmAction('Open this saved puzzle? Unsaved changes in the current puzzle will be replaced.'))return;const token=++loadToken,version=revision;const restored=await restorePuzzle(await api('/api/puzzles/'+encodeURIComponent(item.id)));if(token!==loadToken||version!==revision)return notify('The workspace changed while opening. Open the saved puzzle again.');setPuzzle(restored,false);$('load-dialog').close();notify('Puzzle opened.');});
   const rename=document.createElement('button');rename.className='icon-button';rename.textContent='✎';rename.title='Rename '+item.name;rename.setAttribute('aria-label',rename.title);
   rename.onclick=()=>{if(storageBusy)return;renameItem=item;$('rename-name').value=item.name;$('rename-dialog').showModal();$('rename-name').select();};

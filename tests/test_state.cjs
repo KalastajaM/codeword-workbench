@@ -613,3 +613,13 @@ test('Correcting a number moves the cell to the new number in confirmed letters 
  p = make(); p.rules.maxLettersPerNumber = 2; renumberCell(p, 2, '1');
  assert.equal(p.suggestions.solutions[0].letters[2], '');
 });
+test('Saved-puzzle list offers only languages present, with counts, and filters by language', () => {
+ const {savedPuzzleView} = require('../static/state.js');
+ const items = [{id:'a', language:'fi'}, {id:'b', language:'en'}, {id:'c', language:'fi'}, {id:'d'}];
+ const all = savedPuzzleView(items);
+ assert.deepEqual(all.languages.map(l => [l.code, l.name, l.count]), [['en','English',1], ['fi','Finnish',2], ['','Unknown',1]]);
+ assert.equal(all.selected, ''); assert.equal(all.items.length, 4);
+ assert.deepEqual(savedPuzzleView(items, 'fi').items.map(i => i.id), ['a','c'], 'Filter keeps the server order');
+ assert.equal(savedPuzzleView(items, 'sv').selected, '', 'A language no longer present falls back to all');
+ assert.equal(savedPuzzleView(items, 'sv').items.length, 4);
+});
