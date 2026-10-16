@@ -7,7 +7,7 @@ from unittest.mock import patch
 from PIL import Image, ImageDraw
 
 from app.ocr import recognize
-from app.straighten import HANDLE_NAMES, MARGIN, outline, straighten, straighten_image
+from app.straighten import HANDLE_NAMES, MARGIN, detect_outline, outline, straighten, straighten_image
 
 ROWS, COLS, PITCH = 23, 20, 50
 BLACK = {(0, 3), (2, 7), (5, 0), (6, 14), (9, 9), (11, 4), (22, 19), (17, 12)}
@@ -210,6 +210,35 @@ class StraightenTests(unittest.TestCase):
         self.assertGreater(moved['topRight']['x'], 1)
         result = straighten({'image': data_url(cropped), 'handles': moved})
         self.assertEqual((result['rows'], result['cols']), (ROWS, COLS))
+
+    def test_the_printed_border_is_found_without_placing_handles(self):
+        photo, expected = photo_fixture(hook=30)
+        # A dark table around the page is a larger ink shape, but it is not a grid.
+        draw = ImageDraw.Draw(photo)
+        draw.rectangle((0, 950, 1300, 1000), fill=(30, 25, 20))
+        draw.rectangle((1250, 0, 1300, 1000), fill=(30, 25, 20))
+        found = detect_outline(photo)
+        for name in ('topLeft', 'topRight', 'bottomRight', 'bottomLeft'):
+            with self.subTest(corner=name):
+                self.assertLess(math.dist((found[name]['x'] * photo.width, found[name]['y'] * photo.height),
+                                          (expected[name]['x'] * photo.width, expected[name]['y'] * photo.height)), 6)
+        self.assertTrue(all(len(found[name]) == 5 for name in ('top', 'right', 'bottom', 'left')))
+        border = outline(found, photo.width, photo.height, steps=400)
+        truth = [photographed(t * COLS * PITCH, 0, 30) for t in (.25, .5, .75, .9)]
+        for x, y in truth:
+            self.assertLess(min(math.dist((x, y), (u * photo.width, v * photo.height)) for u, v in border['top']), 4)
+        result = straighten({'image': data_url(photo), 'handles': found})
+        self.assertEqual((result['rows'], result['cols']), (ROWS, COLS))
+
+    def test_a_cut_off_corner_is_extended_beyond_the_photo(self):
+        photo, expected = photo_fixture()
+        cropped = photo.crop((0, 0, 1040, 1000))
+        found = detect_outline(cropped)
+        self.assertGreater(found['topRight']['x'], 1)
+        self.assertLess(abs(found['topRight']['x'] * cropped.width - expected['topRight']['x'] * photo.width), 15)
+
+    def test_no_border_is_reported_on_a_blank_page(self):
+        self.assertIsNone(detect_outline(Image.new('RGB', (600, 500), (240, 238, 230))))
 
     def test_invalid_handles_are_rejected(self):
         photo, handles = photo_fixture()

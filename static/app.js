@@ -626,7 +626,7 @@ function straightenSize(){const image=$('puzzle-image');return [image.naturalWid
 function renderStraighten(){
  if(!puzzle.image)straightenHandles=null;
  const active=!!straightenHandles,was=$('board-stage').classList.contains('straightening');$('board-stage').classList.toggle('straightening',active);if(was!==active)updateView();$('straighten-overlay').hidden=!active;$('straighten-panel').hidden=!active;$('straighten-photo').hidden=active;
- $('straighten-apply').disabled=$('straighten-cancel').disabled=straightenBusy;
+ $('straighten-apply').disabled=$('straighten-cancel').disabled=$('straighten-detect').disabled=straightenBusy;
  if(!active)return;
  const [width,height]=straightenSize(),paths=Straighten.edgePaths(straightenHandles,width,height);
  $('straighten-outline').setAttribute('d',Straighten.outlinePath(straightenHandles,width,height));
@@ -666,7 +666,19 @@ for(const edge of Straighten.EDGE_NAMES)$('straighten-hit-'+edge).onclick=event=
  if(added.error)return notify(added.error);
  straightenHandles=added.handles;renderStraighten();$('handle-'+edge+'-'+added.index).focus();
 };
-$('straighten-photo').onclick=()=>{if(!puzzle.image||!editMode)return;straightenHandles=Straighten.defaultHandles();fitMode='puzzle';updateView();renderStraighten();$('board-stage').scrollIntoView({block:'nearest'});};
+// Puzzles have a printed border, so the handles start on it when it can be found.
+async function detectBorder(){
+ const target=puzzle,image=puzzle.image;straightenBusy=true;renderStraighten();notify('Looking for the grid border…');
+ try{
+  const {handles}=await api('/api/straighten/detect',{image});
+  if(puzzle!==target||puzzle.image!==image||!straightenHandles)return;
+  if(handles){straightenHandles=handles;notify('Found the grid border. Check that the outline follows it, drag any handle that is off, then Apply.');}
+  else notify('Could not find the grid border. Drag the corner handles onto the outer corners of the grid.',true);
+ }catch(error){notify('Could not look for the grid border: '+error.message+' Drag the corner handles onto the outer corners of the grid.',true);}
+ finally{straightenBusy=false;renderStraighten();}
+}
+$('straighten-photo').onclick=()=>{if(!puzzle.image||!editMode)return;straightenHandles=Straighten.defaultHandles();fitMode='puzzle';updateView();renderStraighten();$('board-stage').scrollIntoView({block:'nearest'});detectBorder();};
+$('straighten-detect').onclick=()=>{if(straightenHandles&&!straightenBusy)detectBorder();};
 $('straighten-cancel').onclick=()=>{straightenHandles=null;renderStraighten();};
 $('straighten-apply').onclick=protect(async()=>{
  if(!straightenHandles||straightenBusy)return;
