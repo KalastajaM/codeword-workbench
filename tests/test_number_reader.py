@@ -36,6 +36,31 @@ class NumberSegmentationTests(unittest.TestCase):
         draw.text((4+font.getlength('1')-3, 2), '8', font=font, fill='black')
         self.assertEqual(len(number_glyphs(image)), 2)
 
+    def test_grid_line_slivers_and_bent_border_pieces_are_not_digits(self):
+        # A crop a pixel off the grid keeps a short piece of the side stroke,
+        # and a curled page bends the outer border into the cell's corner.
+        image = Image.new('RGB', (70, 70), 'white')
+        draw = ImageDraw.Draw(image)
+        draw.text((9, 6), '8', font=ImageFont.load_default(size=22), fill='black')
+        draw.line((1, 4, 1, 26), fill='black', width=1)
+        self.assertEqual(len(number_glyphs(image)), 1)
+        bent = Image.new('RGB', (70, 70), 'white')
+        draw = ImageDraw.Draw(bent)
+        draw.text((8, 9), '16', font=ImageFont.load_default(size=22), fill='black')
+        draw.line([(2, 0), (2, 22)], fill='black', width=1)
+        draw.line([(2, 4), (22, 0)], fill='black', width=1)
+        self.assertEqual(len(number_glyphs(bent)), 2)
+
+    def test_faint_thin_digits_stay_whole(self):
+        # Photographed print has light, thin strokes next to a dark border.
+        image = Image.new('RGB', (70, 70), (235, 235, 235))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 69, 69), outline=(20, 20, 20), width=2)
+        draw.text((8, 6), '16', font=ImageFont.load_default(size=22), fill=(120, 120, 120))
+        # Camera blur thins the strokes further.
+        image = image.resize((140, 140)).resize((70, 70), Image.Resampling.BILINEAR)
+        self.assertEqual(len(number_glyphs(image)), 2)
+
     def test_large_letters_and_blank_cells_are_not_numbers(self):
         image = cell('')
         ImageDraw.Draw(image).text((15, 15), 'W', font=ImageFont.load_default(size=36), fill='black')
