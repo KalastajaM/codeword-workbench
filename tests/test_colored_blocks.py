@@ -30,3 +30,10 @@ class ColoredBlockTests(unittest.TestCase):
         # A printed number marks a shaded answer cell, which stays playable.
         ImageDraw.Draw(crops[2]).rectangle((7, 6, 10, 22), fill='black')
         self.assertEqual(photo_blocks(crops), {0})
+
+    def test_photo_blocks_include_dark_tints(self):
+        # Teal or navy blocks are darker than pale tints but lighter than black ink.
+        teal = (40, 120, 118)
+        crops = [Image.new('RGB', (80, 80), teal), Image.new('RGB', (80, 80), teal)]
+        ImageDraw.Draw(crops[1]).rectangle((7, 6, 10, 22), fill=(15, 15, 15))
+        self.assertEqual(photo_blocks(crops), {0})
