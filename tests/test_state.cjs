@@ -623,3 +623,12 @@ test('Saved-puzzle list offers only languages present, with counts, and filters 
  assert.equal(savedPuzzleView(items, 'sv').selected, '', 'A language no longer present falls back to all');
  assert.equal(savedPuzzleView(items, 'sv').items.length, 4);
 });
+
+test('Solve progress names preparation and says the search time starts after it', () => {
+ const {solveProgressText} = require('../static/state.js');
+ assert.equal(solveProgressText({stage:'indexing_dictionary',elapsedSeconds:1.26}), 'Preparing: indexing dictionary · 1.3 seconds · search time starts after this');
+ assert.equal(solveProgressText({stage:'adapting_letter_model'}), 'Preparing: adapting letter model · 0.0 seconds · search time starts after this');
+ assert.equal(solveProgressText(null), 'Preparing: loading puzzle and dictionary · 0.0 seconds · search time starts after this');
+ assert.equal(solveProgressText({stage:'missing_word_search',nodes:1200,elapsedSeconds:2,solutionsFound:1}), `missing word search · ${(1200).toLocaleString()} search nodes · 2.0 seconds · 1 suggestions found`);
+ assert.equal(solveProgressText({stage:'missing_word_search'},true), 'Stopping search · 0.0 seconds');
+});
