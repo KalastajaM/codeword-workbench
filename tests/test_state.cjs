@@ -570,6 +570,7 @@ test('Workspace mode view keeps guests off server storage and explains their lim
  const signedOut = workspaceModeView({mode:'signed-out', userLogin:true});
  assert.equal(signedOut.serverStorage, false); assert.equal(signedOut.modeButton, null);
  assert.equal(workspaceModeView({mode:'bogus'}).mode, 'local');
+});
 test('Blocks and picture areas keep no number review mark when a puzzle is loaded', () => {
 const puzzle = canonicalPuzzle({rows:1, cols:2, language:'en', cells:[
  {black:true, clue:true, number:'', numberReview:'check'}, {number:'', numberReview:'missing'}]});

@@ -716,17 +716,16 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
                             self.send_data(200, result)
                         finally:
                             slots.release()
-                            expensive.release()
                 elif method == 'POST' and path == '/api/straighten/detect':
                     p = self.payload()
-                    if not expensive.acquire(blocking=False):
+                    if not slots.acquire(blocking=False):
                         self.send_data(429, {'error': 'Another solve or recognition is running. Try again shortly.'})
                         return
                     try:
                         from .straighten import detect
                         self.send_data(200, detect(p))
                     finally:
-                        expensive.release()
+                        slots.release()
                 elif method == 'POST' and path == '/api/straighten':
                     p = self.payload()
                     if not slots.acquire(blocking=False):
