@@ -577,3 +577,37 @@ const puzzle = canonicalPuzzle({rows:1, cols:2, language:'en', cells:[
 assert.equal('numberReview' in puzzle.cells[0], false);
 assert.equal(puzzle.cells[1].numberReview, 'missing');
 });
+test('Correcting a number moves the cell to the new number in confirmed letters and kept suggestions', () => {
+ const {renumberCell, refreshDeductions, suggestedLetter, suggestionLabel} = require('../static/state.js');
+ // C A T with numbers 1 2 3; the last cell is corrected from 3 to 1.
+ const make = () => { const p = canonicalPuzzle({rows:1, cols:4, language:'en', cells:[{number:'1'},{number:'2'},{number:'3'},{number:'4'}]});
+  p.suggestions = {status:'completed', solutions:[{letters:['C','A','T','S'], score:1, words:[]}, {letters:['B','A','T','S'], score:2, words:[]}], stats:{}, diagnostics:[]};
+  return p; };
+ let p = make();
+ assert.equal(renumberCell(p, 2, '1'), true);
+ refreshDeductions(p, true);
+ assert.deepEqual(p.suggestions.solutions.map(s => s.letters), [['C','A','C','S'], ['B','A','B','S']], 'Each suggestion uses its own letter for the new number');
+ assert.equal(p.cells[2].number, '1');
+ assert.equal(renumberCell(p, 2, '1'), false, 'Same number: no change');
+ // A number used nowhere else leaves the cell empty in every suggestion.
+ p = make(); renumberCell(p, 2, '9'); refreshDeductions(p, true);
+ assert.deepEqual(p.suggestions.solutions[0].letters, ['C','A','','S']);
+ // A confirmed answer letter belonged to the old number: cleared, and the new number's
+ // confirmed letter shows as a mapping deduction, not a confirmed letter.
+ p = make(); p.cells[0].letter = 'C'; p.cells[2].letter = 'T'; p.cells[2].guess = '';
+ renumberCell(p, 2, '1'); refreshDeductions(p, true);
+ assert.equal(p.cells[2].letter, ''); assert.equal(suggestedLetter(p, 2), 'C'); assert.equal(suggestionLabel(p, 2), 'Mapping deduction');
+ assert.equal(p.suggestions.solutions.length, 1, 'Suggestions that contradict confirmed letters are dropped');
+ // A printed (prefilled) letter stays and keeps suggestions that agree with it.
+ p = make(); p.cells[2].letter = 'T'; p.cells[2].prefilled = true;
+ renumberCell(p, 2, '9'); refreshDeductions(p, true);
+ assert.equal(p.cells[2].letter, 'T'); assert.equal(p.suggestions.solutions.length, 2);
+ assert.deepEqual(p.suggestions.solutions[0].letters, ['C','A','T','S']);
+ // Partial results follow the same rule; a cleared number takes no letter.
+ p = make(); p.suggestions = {partialLetters:['C','A','T',''], solutions:[], stats:{}, diagnostics:[]};
+ renumberCell(p, 2, '1'); assert.deepEqual(p.suggestions.partialLetters, ['C','A','C','']);
+ renumberCell(p, 2, ''); assert.deepEqual(p.suggestions.partialLetters, ['C','A','','']);
+ // With several letters per number, a number does not determine the letter.
+ p = make(); p.rules.maxLettersPerNumber = 2; renumberCell(p, 2, '1');
+ assert.equal(p.suggestions.solutions[0].letters[2], '');
+});

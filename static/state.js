@@ -84,6 +84,29 @@ function refreshDeductions(puzzle,retainAlternatives=true){
  if(previous||forcedLetters.some((l,i)=>l&&!puzzle.cells[i].letter))puzzle.suggestions={...previous,status:previous?.status||'mapping_deductions',solutions,forcedLetters,stats:{...previous?.stats,exhaustive:false},diagnostics:previous?.diagnostics||[]};
  else delete puzzle.suggestions;
 }
+// Correcting a cell's number moves the cell to the new number's letter.
+// An answer letter belonged to the old number and is cleared; a letter
+// printed in the grid (prefilled) stays. Confirmed letters of the new number
+// then show as a mapping deduction, never as a confirmed letter. Each kept
+// suggestion gives the cell the letter it has for the new number elsewhere
+// in the grid, or none. Returns false when nothing changed.
+function renumberCell(puzzle,index,number){
+ const cell=puzzle.cells[index];if(!cell||cell.black||cell.number===number)return false;
+ cell.number=number;cell.mappingAnchor=false;delete cell.numberReview;
+ if(!cell.prefilled){cell.letter='';cell.guess='';}
+ const letterFor=letters=>{
+  if(cell.letter)return cell.letter;
+  if(!number||puzzle.rules.maxLettersPerNumber!==1)return '';
+  const other=puzzle.cells.findIndex((c,i)=>i!==index&&!c.black&&c.number===number&&(c.letter||letters?.[i]));
+  return other<0?'':puzzle.cells[other].letter||letters[other];
+ };
+ const suggestions=puzzle.suggestions;
+ if(suggestions){
+  suggestions.solutions=(suggestions.solutions||[]).map(solution=>{const letters=[...solution.letters];letters[index]=letterFor(solution.letters);return {...solution,letters};});
+  if(suggestions.partialLetters){const letters=[...suggestions.partialLetters];letters[index]=letterFor(suggestions.partialLetters);suggestions.partialLetters=letters;}
+ }
+ return true;
+}
 function clearMappingProvenance(puzzle,number){for(const cell of puzzle.cells)if(cell.number===number)cell.mappingAnchor=false;}
 function confirmCells(puzzle,indices,solutionIndex=0){
  const pending=[...new Set(indices)].filter(i=>puzzle.cells[i]&&!puzzle.cells[i].black&&!puzzle.cells[i].letter&&suggestedLetter(puzzle,i,solutionIndex));
@@ -466,5 +489,5 @@ function workspaceModeView(info){
   maxImportBytes:guest?megabytes*1024*1024:16*1024*1024,
   dictionaryNote:guest?`Guest mode: dictionary changes apply only to this browser session and are removed after ${hours} hours without use. Up to ${words.toLocaleString('en')} words and ${megabytes} MB.`:''};
 }
-const helpers={workspaceModeView,visibleRuledOut,numberIsOpen,canonicalEliminations,ruledOutLetters,setRuledOut,slotIdentity,rejectedWordsFor,setWordRejected,eliminationSuggestionGroups,wordAssessmentQueue,assessedWord,assessedWordLabel,displayedPuzzleWords,solvedWordActions,solvedWordEvidence,solvedWordsView,solvedWordSelection,solvedWordPatternScore,mappingCyclePlan,numberMovePlan,clearMappingProvenance,numberRemovalPlan,numberAssignmentPlan,dictionaryInputWords,dictionarySearchSummary,nordicLetters,completeWordText,selectedWordCheckText,patternScoreText,candidateEvidenceText,wordLookupText,lookupPattern,dictionaryPages,languagePresentation,dictionaryEditor,cellWord,letterOwners,moveLetterAssignment,resetSuggestions,editConfirmedLetter,cancelledResult,solveStopExplanation,hasSolveProgress,mappingLetterInfo,changeMappingLetter,resetProgress,suggestionLabel,restoredWords,wordEvidenceLabel,plausibilityLabel,plausibilityDetail,candidateDisplay,solveRunner,canonicalPuzzle,slots,candidateLetters,matchesSlot,blankCell,numberEntry,imageBoundsFromPercent,fitScale,suggestedLetter,mappingDeductions,solveSummary,refreshDeductions,confirmCells,unconfirmCells,numberCells,undoConfirmation,acceptanceHistory,wordChoices,candidateSelection,candidateSearchPuzzle};if(typeof module!=='undefined'&&module.exports)module.exports=helpers;else root.PuzzleState=helpers;
+const helpers={renumberCell,workspaceModeView,visibleRuledOut,numberIsOpen,canonicalEliminations,ruledOutLetters,setRuledOut,slotIdentity,rejectedWordsFor,setWordRejected,eliminationSuggestionGroups,wordAssessmentQueue,assessedWord,assessedWordLabel,displayedPuzzleWords,solvedWordActions,solvedWordEvidence,solvedWordsView,solvedWordSelection,solvedWordPatternScore,mappingCyclePlan,numberMovePlan,clearMappingProvenance,numberRemovalPlan,numberAssignmentPlan,dictionaryInputWords,dictionarySearchSummary,nordicLetters,completeWordText,selectedWordCheckText,patternScoreText,candidateEvidenceText,wordLookupText,lookupPattern,dictionaryPages,languagePresentation,dictionaryEditor,cellWord,letterOwners,moveLetterAssignment,resetSuggestions,editConfirmedLetter,cancelledResult,solveStopExplanation,hasSolveProgress,mappingLetterInfo,changeMappingLetter,resetProgress,suggestionLabel,restoredWords,wordEvidenceLabel,plausibilityLabel,plausibilityDetail,candidateDisplay,solveRunner,canonicalPuzzle,slots,candidateLetters,matchesSlot,blankCell,numberEntry,imageBoundsFromPercent,fitScale,suggestedLetter,mappingDeductions,solveSummary,refreshDeductions,confirmCells,unconfirmCells,numberCells,undoConfirmation,acceptanceHistory,wordChoices,candidateSelection,candidateSearchPuzzle};if(typeof module!=='undefined'&&module.exports)module.exports=helpers;else root.PuzzleState=helpers;
 })(typeof globalThis!=='undefined'?globalThis:this);

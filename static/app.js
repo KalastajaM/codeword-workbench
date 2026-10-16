@@ -63,7 +63,15 @@ $('user-mode').onclick=protect(async()=>{
  if(session.mode==='guest')notify('Guest mode: your work stays in this browser. Use Export JSON to keep a copy.');
 });
 function protect(fn){return async(...args)=>{try{await fn(...args);}catch(error){notify(error.message,true);}};}
-function invalidate(){clearCandidateResults();clearLookup();acceptanceHistory.clear();if($('solve-status').textContent)$('solve-status').textContent='Puzzle changed. Solve again for current suggestions.';solveJob.cancel();revision++;delete puzzle.suggestions;PuzzleState.refreshDeductions(puzzle,false);solutionIndex=0;clearTimeout(validateTimer);validateTimer=setTimeout(validate,180);}
+function invalidate(keepSuggestions=false){clearCandidateResults();clearLookup();acceptanceHistory.clear();if($('solve-status').textContent)$('solve-status').textContent='Puzzle changed. Solve again for current suggestions.';solveJob.cancel();revision++;if(!keepSuggestions)delete puzzle.suggestions;PuzzleState.refreshDeductions(puzzle,keepSuggestions);solutionIndex=keepSuggestions?Math.min(solutionIndex,Math.max(0,(puzzle.suggestions?.solutions?.length||1)-1)):0;clearTimeout(validateTimer);validateTimer=setTimeout(validate,180);}
+// A corrected number keeps the suggestions, adjusted to the new number, so a
+// typo found after solving does not throw the result away.
+function changeNumber(index,number){
+ const had=!!(puzzle.suggestions?.solutions?.length||puzzle.suggestions?.partialLetters);
+ if(!PuzzleState.renumberCell(puzzle,index,number))return;
+ invalidate(true);
+ if(had)$('solve-status').textContent=puzzle.suggestions?.solutions?.length||puzzle.suggestions?.partialLetters?'Number changed. The suggestions now use the new number; solve again to check them.':'Number changed. No suggestion fits the confirmed letters any more; solve again.';
+}
 async function validate(){const version=revision;try{const result=await api('/api/validate',puzzle);if(version===revision){$('conflicts').textContent=result.conflicts.join(' · ');eliminationSuggestions=result.valid&&Array.isArray(result.suggestedEliminations)?result.suggestedEliminations:[];renderEliminations();}}catch(error){if(version===revision){$('conflicts').textContent=error.message;eliminationSuggestions=[];renderEliminations();}}}
 function solution(){return puzzle.suggestions?.solutions?.[solutionIndex];}
 function suggestion(i){return PuzzleState.suggestedLetter(puzzle,i,solutionIndex);}
@@ -419,7 +427,7 @@ function gridKey(event){
  else if(event.key===' '){event.preventDefault();toggleBlack();}
  else if(!cell.black&&(/^[0-9]$/.test(event.key)||event.key==='Backspace')){
   event.preventDefault();const next=PuzzleState.numberEntry(numericEntry,selected,event.key,Date.now());
-  if(next){numericEntry=next;cell.number=next.digits;cell.mappingAnchor=false;delete cell.numberReview;invalidate();}else if(event.key==='Backspace'){numericEntry=null;editLetter('');}
+  if(next){numericEntry=next;changeNumber(selected,next.digits);}else if(event.key==='Backspace'){numericEntry=null;editLetter('');}
  }else if(!cell.black&&event.key==='Delete'){event.preventDefault();numericEntry=null;editLetter('');}
  else if(!cell.black&&new RegExp(PuzzleState.nordicLetters(puzzle.language)?'^[a-zåäö]$':'^[a-z]$','i').test(event.key)){event.preventDefault();numericEntry=null;editLetter(normalize(event.key));}
  else return;
@@ -449,7 +457,7 @@ function renderEditMode(){
  }
 }
 
-$('cell-clue').onchange=()=>{numericEntry=null;const c=puzzle.cells[selected];c.clue=$('cell-clue').checked;c.black=c.clue;c.number='';c.letter='';c.guess='';c.mappingAnchor=false;delete c.numberReview;invalidate();render();};$('cell-black').onchange=toggleBlack;$('cell-number').onchange=()=>{const number=$('cell-number').value.trim();if(number&&!/^[1-9][0-9]{0,2}$/.test(number)){notify('A number must be a positive integer from 1 to 999.',true);return renderInspector();}puzzle.cells[selected].number=number;puzzle.cells[selected].mappingAnchor=false;delete puzzle.cells[selected].numberReview;invalidate();render();};$('cell-letter').onchange=()=>{const letter=normalize($('cell-letter').value.trim());if(letter&&!new RegExp(PuzzleState.nordicLetters(puzzle.language)?'^[A-ZÅÄÖ]$':'^[A-Z]$').test(letter)){notify('Enter exactly one letter from the selected language alphabet.',true);return renderInspector();}editLetter(letter);render();};for(const[id,key]of Object.entries(flags))$(id).onchange=()=>{puzzle.cells[selected][key]=$(id).checked;invalidate();render();};$('accept-all').onclick=()=>accept(puzzle.cells.map((_,i)=>i));$('accept-deductions').onclick=()=>{const candidates=puzzle.cells.map((_,i)=>i).filter(i=>puzzle.suggestions?.forcedLetters?.[i]);accept(candidates);};$('alternatives').onchange=()=>{clearCandidateResults();solutionIndex=Number($('alternatives').value);render();};
+$('cell-clue').onchange=()=>{numericEntry=null;const c=puzzle.cells[selected];c.clue=$('cell-clue').checked;c.black=c.clue;c.number='';c.letter='';c.guess='';c.mappingAnchor=false;delete c.numberReview;invalidate();render();};$('cell-black').onchange=toggleBlack;$('cell-number').onchange=()=>{const number=$('cell-number').value.trim();if(number&&!/^[1-9][0-9]{0,2}$/.test(number)){notify('A number must be a positive integer from 1 to 999.',true);return renderInspector();}changeNumber(selected,number);render();};$('cell-letter').onchange=()=>{const letter=normalize($('cell-letter').value.trim());if(letter&&!new RegExp(PuzzleState.nordicLetters(puzzle.language)?'^[A-ZÅÄÖ]$':'^[A-Z]$').test(letter)){notify('Enter exactly one letter from the selected language alphabet.',true);return renderInspector();}editLetter(letter);render();};for(const[id,key]of Object.entries(flags))$(id).onchange=()=>{puzzle.cells[selected][key]=$(id).checked;invalidate();render();};$('accept-all').onclick=()=>accept(puzzle.cells.map((_,i)=>i));$('accept-deductions').onclick=()=>{const candidates=puzzle.cells.map((_,i)=>i).filter(i=>puzzle.suggestions?.forcedLetters?.[i]);accept(candidates);};$('alternatives').onchange=()=>{clearCandidateResults();solutionIndex=Number($('alternatives').value);render();};
 const solveJob=PuzzleState.solveRunner({
  request:api,
  onBusy:busy=>{for(const id of ['solve','solve-grid']){$(id).disabled=busy;$(id).textContent=busy?'Finding possibilities…':'Solve puzzle →';}$('cancel-solve').hidden=!busy;$('cancel-solve').disabled=false;$('cancel-solve').textContent='Cancel search';},

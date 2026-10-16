@@ -93,6 +93,8 @@ Word rows show only available confirmation actions. Partially confirmed words ca
 
 Use **Confirm** to turn a provisional letter into a fixed constraint. **Unconfirm** releases the constraint and keeps the letter as a provisional guess, which is saved but ignored by the solver. Word rows support confirmation and unconfirmation; the cell inspector also provides an action for every occurrence of the selected number. If another occurrence still confirms that mapping, a released cell remains a mapping deduction.
 
+To correct a misread number after solving, change it in Edit mode. The suggestions stay: in each one the cell takes the letter that suggestion gives the new number elsewhere in the grid, or stays empty if the number appears nowhere else. An answer letter in that cell belonged to the old number and is cleared; a letter printed in the grid (entered in Edit mode) stays. If the new number already has a confirmed letter, the cell shows it as a mapping deduction for you to confirm. Suggestions that contradict confirmed letters are dropped. Solve again to check the adjusted suggestions. Other changes to the grid still clear the suggestions.
+
 **Undo last confirmation** restores the previous acceptance state, including a bulk acceptance. This history is limited to the current session and is cleared by unrelated constraint edits, loading another puzzle or running a new search. Unconfirming is available for letters entered manually as well. Mapping deduction is computed automatically from the remaining confirmed letters.
 
 ## Ruled-out letters and wrong words
