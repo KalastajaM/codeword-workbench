@@ -3,8 +3,8 @@
 A local browser workspace for solving codeword puzzles (number-cipher
 crosswords) in English, Finnish, Dutch and Swedish. Import a screenshot, photo
 or PDF of a puzzle, or draw the grid yourself; the app reads the grid and
-numbers, runs a bounded constraint search over your word lists, and lets you
-accept letters one cell, word or mapping at a time.
+numbers, solves it with or without a word list, and lets you accept letters
+one cell, word or mapping at a time.
 
 ![Codeword Workbench](docs/workspace-preview.png)
 
@@ -14,8 +14,11 @@ accept letters one cell, word or mapping at a time.
 - **Solver:** indexed, cancellable constraint search with crossing and
   number-mapping propagation; tolerates names and other words missing from
   the dictionary.
-- **Without a dictionary:** per-language letter-pattern models suggest likely
-  letters and flag implausible words.
+- **Without a dictionary:** per-language letter-pattern models score whole
+  letter mappings across all crossing words. In testing on several full-size
+  printed puzzles, **Deep** search solved the grid with no word list
+  installed; **Quick** search was not enough. The same models flag
+  implausible words.
 - **Honest output:** confirmed letters stay separate from suggestions, and
   every suggested word says what supports it.
 - **Local-first:** a Python standard-library server on 127.0.0.1; no
@@ -44,10 +47,13 @@ Optional extras:
 
 ## Dictionaries
 
-The app ships only small demonstration word lists. For real puzzles, import a
-full list per language: [docs/dictionaries.md](docs/dictionaries.md) lists
-free sources (Kotus, Joukahainen, OpenTaal, SALDO, Webster's) and the scripts
-that convert them to the one-word-per-line import format.
+The app ships only small demonstration word lists, and real puzzles may not
+need more: turn off **Use dictionary** and run a **Deep** search.
+Importing a full list per language is optional. With one, search places
+listed words, so each suggested word carries dictionary evidence instead of
+resting on letter patterns alone. [docs/dictionaries.md](docs/dictionaries.md)
+lists free sources (Kotus, Joukahainen, OpenTaal, SALDO, Webster's) and the
+scripts that convert them to the one-word-per-line import format.
 
 ## Documentation
 
