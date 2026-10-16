@@ -60,8 +60,8 @@ def check_puzzle(p):
         if not isinstance(cell, dict) or type(cell.get('black', False)) is not bool:
             raise ValueError('Each cell must have a valid black-cell state.')
         number = cell.get('number', '')
-        if not isinstance(number, str) or (number and not re.fullmatch(r'[1-9][0-9]{0,2}', number)):
-            raise ValueError('Cell numbers must be empty or integers from 1 to 999.')
+        if not isinstance(number, str) or (number and not re.fullmatch(r'[1-9][0-9]?', number)):
+            raise ValueError('Cell numbers must be empty or integers from 1 to 99.')
         letter = cell.get('letter', '')
         if not isinstance(letter, str):
             raise ValueError('Cell letters must be text.')

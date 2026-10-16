@@ -75,7 +75,7 @@ def validate(puzzle):
         if not isinstance(c,dict): errors.append(f'Cell {i+1} must be an object.'); continue
         if type(c.get('black',False))!=bool: errors.append(f'Cell {i+1}: black must be boolean.')
         n=c.get('number',''); l=c.get('letter','')
-        if not isinstance(n,str) or (n and (not n.isascii() or not n.isdecimal() or len(n)>3 or not 1<=int(n)<=999)): errors.append(f'Cell {i+1}: number must be empty or an integer from 1 to 999.')
+        if not isinstance(n,str) or (n and (not n.isascii() or not n.isdecimal() or len(n)>2 or not 1<=int(n)<=99)): errors.append(f'Cell {i+1}: number must be empty or an integer from 1 to 99.')
         if not isinstance(l,str) or (l and (len(normalize(l))!=1 or normalize(l) not in ALPHABETS[language])): errors.append(f'Cell {i+1}: enter exactly one letter from the selected alphabet.')
         for key in ('openBeforeAcross','openAfterAcross','openBeforeDown','openAfterDown'):
             if key in c and type(c[key])!=bool: errors.append(f'Cell {i+1}: boundary flags must be boolean.')
