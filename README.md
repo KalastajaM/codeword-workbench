@@ -17,8 +17,9 @@ one cell, word or mapping at a time.
 - **Without a dictionary:** per-language letter-pattern models score whole
   letter mappings across all crossing words. In testing on several full-size
   printed puzzles, **Deep** search solved the grid with no word list
-  installed; **Quick** search was not enough. The same models flag
-  implausible words.
+  installed; **Quick** search was not enough. Letters whose number could
+  take another letter at almost no cost are outlined, so you know where to
+  check first. The same models flag implausible words.
 - **Honest output:** confirmed letters stay separate from suggestions, and
   every suggested word says what supports it.
 - **Local-first:** a Python standard-library server on 127.0.0.1; no
@@ -32,9 +33,12 @@ Requires Python 3.10 or newer.
 python3 run.py
 ```
 
-Open <http://127.0.0.1:8765>, choose **Try a small example**, then
-**Solve puzzle**. Use `--port 8766` if the port is taken and
-`--data-dir /path` to keep data elsewhere. On macOS, `start.command` starts
+Open <http://127.0.0.1:8765>, choose **Full-size showcase**, then **Solve
+puzzle**: an original 13 × 13 codeword with no letters given is solved
+without a dictionary, the grid shows the best guess while the search runs,
+and the app then reports how many cells match the known answer. **Try a small
+example** loads a 3 × 3 word square instead. Use `--port 8766` if the port is
+taken and `--data-dir /path` to keep data elsewhere. On macOS, `start.command` starts
 the server with a double-click.
 
 Optional extras:
@@ -55,8 +59,30 @@ resting on letter patterns alone. [docs/dictionaries.md](docs/dictionaries.md)
 lists free sources (Kotus, Joukahainen, OpenTaal, SALDO, Webster's) and the
 scripts that convert them to the one-word-per-line import format.
 
+## Benchmark
+
+`scripts/benchmark_solver.py` solves five original 13 × 13 grids
+(`scripts/benchmark_puzzles.json`, the first is the showcase) under two
+number keys each, with no letters given. On a 4-core Linux container:
+
+| Configuration | Grids fully right | Worst grid | Time |
+|---|---|---|---|
+| No dictionary, Quick | 6 of 10 | 97.4% of cells | 2.6 s (final answer first shown after 0.3 s) |
+| No dictionary, Deep | 6 of 10 | 97.4% of cells | 60 s |
+| Webster's 2nd (236,000 words), Quick or Deep | 8 of 10 | 97.4% of cells | about 1 s, including indexing |
+
+Every wrong cell in the dictionary-free runs was outlined as having a close
+rival. Grid 3 accounts for the worst result in every configuration: it has
+four valid fills (BAKING or WAKING, BENT, VENT or WENT, ROB or ROW), and
+the intended one ranks fourth. These generated grids are easier than many
+printed puzzles: on real puzzles, Quick search without a dictionary was not
+enough in testing, so the app uses Deep when the dictionary is off.
+
 ## Documentation
 
+- [How codeword solving works](static/how-it-works.html): the solving
+  stages, a step-through of the search, and every limit the solver applies
+  (also the first button in the app).
 - [User guide](docs/user-guide.md): every feature, search controls and limits.
 - [Dictionaries](docs/dictionaries.md): sources, conversion, Finnish
   inflected forms, rebuilding the letter models.
@@ -73,7 +99,8 @@ scripts that convert them to the one-word-per-line import format.
 - `app/ocr.py`, `app/number_reader.py`, `app/straighten.py`: image
   validation, Tesseract adapter, digit consensus and photo flattening.
 - `static/`: browser interface and pure state helpers; no build step.
-- `scripts/`: dictionary conversion, model building and benchmarks.
+- `scripts/`: dictionary conversion, model building, the showcase grid
+  generator and benchmarks.
 
 User data (puzzles, dictionaries, autosave) lives under `data/`, which is
 excluded from source control.
