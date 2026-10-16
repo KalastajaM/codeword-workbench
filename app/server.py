@@ -60,8 +60,11 @@ def check_puzzle(p):
         for flag in ('clue', 'highlight', 'prefilled', 'mappingAnchor'):
             if flag in cell and type(cell[flag]) is not bool:
                 raise ValueError('Cell metadata settings must be true or false.')
-        if cell.get('numberReview') not in (None, 'check', 'missing') or cell.get('numberReview') and cell.get('black'):
-            raise ValueError('Number review marks are check or missing, on letter cells only.')
+        if cell.get('numberReview') not in (None, 'check', 'missing'):
+            raise ValueError('Number review marks are check or missing.')
+        if cell.get('black'):
+            # A cell turned into a block or picture area keeps no review mark.
+            cell.pop('numberReview', None)
         if cell.get('clue') and not cell.get('black'):
             raise ValueError('Image clue areas cannot also be letter cells.')
         for flag in ('openBeforeAcross', 'openAfterAcross', 'openBeforeDown', 'openAfterDown'):

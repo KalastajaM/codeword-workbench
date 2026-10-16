@@ -122,6 +122,10 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request('/api/puzzles', p)[0], 200)
         p['cells'][0]['numberReview'] = 'maybe'
         self.assertEqual(self.request('/api/puzzles', p)[0], 400)
+        # A cell later marked as a block or picture area may still carry its
+        # old mark; solving must not fail on it.
+        p['cells'][0].update(numberReview='check', black=True, clue=True, number='', letter='')
+        self.assertEqual(self.request('/api/solve', p)[0], 200)
 
     def test_autosave_round_trip_and_validation(self):
         p = self.puzzle()

@@ -555,3 +555,9 @@ test('dictionary search summary uses singular for one match', () => {
  const {dictionarySearchSummary}=require('../static/state.js');
  assert.equal(dictionarySearchSummary({total:1,query:'K?TT*',status:'disabled',offset:0,words:[{}]}),'1 disabled word matches K?TT* · showing 1–1');
 });
+test('Blocks and picture areas keep no number review mark when a puzzle is loaded', () => {
+const puzzle = canonicalPuzzle({rows:1, cols:2, language:'en', cells:[
+ {black:true, clue:true, number:'', numberReview:'check'}, {number:'', numberReview:'missing'}]});
+assert.equal('numberReview' in puzzle.cells[0], false);
+assert.equal(puzzle.cells[1].numberReview, 'missing');
+});
