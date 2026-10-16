@@ -152,6 +152,9 @@ class HTTPTests(unittest.TestCase):
         for bad in [[], {'image': image}, {'image': 'garbage', 'handles': handles}]:
             code, _ = self.request('/api/straighten', bad)
             self.assertEqual(code, 400)
+        self.assertEqual(self.request('/api/straighten/detect', {'image': image}), (200, {'handles': None}))
+        for bad in [[], {'image': 'garbage'}]:
+            self.assertEqual(self.request('/api/straighten/detect', bad)[0], 400)
 
     def test_empty_dictionary_and_generated_mode(self):
         code, _ = self.request('/api/dictionaries/fi', {'words': []}, 'PUT')

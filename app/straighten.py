@@ -30,6 +30,146 @@ def _point(value, width, height):
     return x * width, y * height
 
 
+DETECT_SIDE = 1400
+DETECT_POINTS = 5
+
+
+def _grid_component(mask):
+    """Pixels of the largest ink shape enclosing an area like a grid border, or None.
+
+    The printed border is one closed, thick stroke, so a row or column through
+    it leaves the shape at least twice, on both sides. A dark background is
+    solid or runs off the photo, and is left only once. Interior strokes may
+    or may not join the border; only the border is needed.
+    """
+    width, height = mask.size
+    ink = mask.tobytes()
+    seen = bytearray(width * height)
+    best = None
+    for start in range(width * height):
+        if seen[start] or not ink[start]:
+            continue
+        seen[start] = 1
+        stack, members = [start], []
+        x0, y0, x1, y1 = width, height, -1, -1
+        while stack:
+            i = stack.pop()
+            members.append(i)
+            x, y = i % width, i // width
+            x0, x1, y0, y1 = min(x0, x), max(x1, x), min(y0, y), max(y1, y)
+            for j in (i - 1 if x else -1, i + 1 if x < width - 1 else -1,
+                      i - width if y else -1, i + width if y < height - 1 else -1):
+                if j >= 0 and ink[j] and not seen[j]:
+                    seen[j] = 1
+                    stack.append(j)
+        area = (x1 - x0 + 1) * (y1 - y0 + 1)
+        if area < .05 * width * height or best is not None and area <= best[0]:
+            continue
+        inside = bytearray(width * height)
+        for i in members:
+            inside[i] = 1
+
+        def crossings(line):
+            return sum(1 for a, b in zip(line, line[1:]) if a and not b)
+        rows = sorted(crossings(inside[y * width + x0:y * width + x1 + 1]) for y in range(y0, y1 + 1, max(1, (y1 - y0) // 20)))
+        cols = sorted(crossings(inside[y0 * width + x:(y1 + 1) * width:width]) for x in range(x0, x1 + 1, max(1, (x1 - x0) // 20)))
+        if min(rows[len(rows) // 2], cols[len(cols) // 2]) >= 2:
+            best = (area, inside)
+    return best[1] if best else None
+
+
+def detect_outline(image):
+    """Handles on the grid's outer border, or None when no grid stands out.
+
+    Corners are the grid shape's extreme points; edge points are where a scan
+    from outside first meets the border, centred on its stroke. A corner the
+    photo cut off is extrapolated from its two edges.
+    """
+    from PIL import Image, ImageFilter
+    scale = min(1, DETECT_SIDE / max(image.size))
+    small = image.convert('RGB').resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))),
+                                         Image.Resampling.BOX)
+    # Evened-out paper is white, so faint strokes still count as ink.
+    mask = even_lighting(small).convert('L').point(lambda value: 255 if value < 190 else 0).filter(ImageFilter.MaxFilter(3))
+    width, height = mask.size
+    inside = _grid_component(mask)
+    if inside is None:
+        return None
+    points = [(i % width, i // width) for i in range(width * height) if inside[i]]
+    corners = {'topLeft': min(points, key=lambda p: p[0] + p[1]), 'topRight': max(points, key=lambda p: p[0] - p[1]),
+               'bottomRight': max(points, key=lambda p: p[0] + p[1]), 'bottomLeft': min(points, key=lambda p: p[0] - p[1])}
+
+    def hit(x, y):
+        return 0 <= x < width and 0 <= y < height and inside[int(y) * width + int(x)]
+    reach = round(.08 * max(width, height))
+    edges = {}
+    # Clockwise around the outline, so the outward normal is on the left.
+    for name, start, end in (('top', 'topLeft', 'topRight'), ('right', 'topRight', 'bottomRight'),
+                             ('bottom', 'bottomRight', 'bottomLeft'), ('left', 'bottomLeft', 'topLeft')):
+        (ax, ay), (bx, by) = corners[start], corners[end]
+        length = math.hypot(bx - ax, by - ay) or 1
+        nx, ny = (by - ay) / length, -(bx - ax) / length
+        found = []
+        for k in range(1, DETECT_POINTS + 1):
+            cx, cy = ax + (bx - ax) * k / (DETECT_POINTS + 1), ay + (by - ay) * k / (DETECT_POINTS + 1)
+            for step in range(reach, -reach, -1):
+                x, y = cx + nx * step, cy + ny * step
+                if not hit(x, y):
+                    continue
+                # Where the grid runs off the photo, the border is not in view.
+                if 1 < x < width - 2 and 1 < y < height - 2:
+                    run = 0
+                    while run < 6 and hit(x - nx * (run + 1), y - ny * (run + 1)):
+                        run += 1
+                    found.append((x - nx * run / 2, y - ny * run / 2))
+                else:
+                    found.append(None)
+                break
+        edges[name] = found
+    edges['bottom'].reverse()
+    edges['left'].reverse()
+    off_photo = {name: (found[0] is None, found[-1] is None) if found else (False, False) for name, found in edges.items()}
+    edges = {name: [point for point in found if point] for name, found in edges.items()}
+    # Edge points now run left to right and top to bottom.
+    for name, (first, first_end), (second, second_end) in (
+            ('topLeft', ('left', 0), ('top', 0)), ('topRight', ('top', -1), ('right', 0)),
+            ('bottomRight', ('right', -1), ('bottom', -1)), ('bottomLeft', ('bottom', 0), ('left', -1))):
+        x, y = corners[name]
+        cut = off_photo[first][first_end] or off_photo[second][second_end]
+        if 2 < x < width - 3 and 2 < y < height - 3 and not cut:
+            continue
+        lines = []
+        for edge, end in ((first, first_end), (second, second_end)):
+            pts = edges[edge][:2] if end == 0 else edges[edge][-2:]
+            if len(pts) < 2:
+                break
+            lines.append((pts[0], (pts[1][0] - pts[0][0], pts[1][1] - pts[0][1])))
+        if len(lines) < 2:
+            continue
+        (p, d), (q, e) = lines
+        det = d[0] * e[1] - d[1] * e[0]
+        if abs(det) > 1e-9:
+            t = ((q[0] - p[0]) * e[1] - (q[1] - p[1]) * e[0]) / det
+            corners[name] = (p[0] + d[0] * t, p[1] + d[1] * t)
+
+    def fraction(point):
+        x, y = point
+        return {'x': min(1 + OUTSIDE, max(-OUTSIDE, x / width)), 'y': min(1 + OUTSIDE, max(-OUTSIDE, y / height))}
+    handles = {name: fraction(point) for name, point in corners.items()}
+    handles.update({name: [fraction(point) for point in found] for name, found in edges.items()})
+    try:
+        _surface(_handles(handles, image.width, image.height))
+    except (ValueError, ZeroDivisionError):
+        return None
+    return handles
+
+
+def detect(payload):
+    if not isinstance(payload, dict):
+        raise ValueError('Border detection needs an image.')
+    return {'handles': detect_outline(decode_image(payload.get('image')))}
+
+
 def _handles(value, width, height):
     """Corner points and, per edge, the points it bends through (in pixels).
 
