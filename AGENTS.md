@@ -10,6 +10,11 @@ Guidance for coding assistants and contributors.
   a suggestion without an explicit user action.
 - Do not present heuristic candidates as verified words or searches as
   exhaustive.
+- `static/how-it-works.html` explains the solver to users. When solver
+  behaviour, limits or validation change, update that page and its search
+  port (`static/how-it-works-engine.js`) together with the user guide.
+  `tests/test_how_it_works.py` checks every figure the page states and runs
+  the port against `app/solver.py`; tag new figures with `data-fact`.
 - No external services or CDN assets. Local mode stays bound to localhost;
   hosted mode must be explicitly configured with an HTTPS origin and an
   explicit access policy (`docs/railway.md`).

@@ -3,6 +3,8 @@ if(typeof document==='undefined')return;
 const WORDS='A I AN AS AT BE BY DO GO HE IF IN IS IT ME MY NO OF ON OR SO TO UP US WE CAT DOG DAD DID MOM SUN SEA SKY CAR BUS MAP PEN RED ART EAT TEA ATE RAT TAR EAR ARE ERA TEN NET ONE TWO BAT BAR TAB BOAT BOOK CODE WORD HOME HOUSE WATER CROSS PUZZLE LETTER NUMBER HELLO WORLD TEST TREE ROAD STAR MOON LIGHT NIGHT DAY PLAY READ WRITE'.split(' ');
 // Letter-model scores from solver._score with the model adapted to this list.
 const SCORE={ARE:5.38,ART:5.29,ATE:5.79,BAR:6.55,BAT:4.09,BUS:5.14,CAR:5.24,CAT:3.71,DAD:3.84,DAY:5.44,DID:4.46,DOG:4.13,EAR:4.89,EAT:1.45,ERA:2.27,MAP:0.12,MOM:-3.25,NET:4.29,ONE:4.95,PEN:5.89,RAT:2.72,RED:8.42,SEA:3.72,SKY:5.39,SUN:4.29,TAB:0.51,TAR:5.03,TEA:4.16,TEN:6.12,TWO:-1.5};
+// Mirrors MAX_SOLUTIONS in app/solver.py; tests/test_how_it_works.py checks it.
+const SOLUTION_LIMIT=12;
 const ANSWER='SEAEARART',NUMS=[1,2,3,2,3,4,3,4,5];
 let given=new Set([3]);  // number 3 = A confirmed
 let run,step=0,timer=null;
@@ -21,7 +23,7 @@ function narrate(t){
     case 'choose':return ['Branch point',`No letter is forced yet. The solver branches on the slot with the fewest candidates (ties go to the longer, then earlier slot): ${lbl(s)}, with ${t.options.length} options tried in score order: ${t.options.join(', ')}.`];
     case 'branch':return ['Try a word',`Place ${t.word} in ${lbl(s)} as a hypothesis, then propagate its consequences.`];
     case 'dead':return ['Contradiction',`Propagation failed: ${t.reason}. This branch is abandoned and the search backtracks to the next queued option.`];
-    case 'solution':return ['Solution',`Every slot holds a listed word and every number has one letter. Recorded as alternative ${t.index}; the search continues until the queue is empty or 12 alternatives are found.`];
+    case 'solution':return ['Solution',`Every slot holds a listed word and every number has one letter. Recorded as alternative ${t.index}; the search continues until the queue is empty or ${SOLUTION_LIMIT} alternatives are found.`];
     case 'done':return ['Search finished',`The queue is empty after ${t.nodes} search nodes and ${t.rounds} propagation rounds, with ${t.solutions} solution${t.solutions===1?'':'s'}. Nothing was truncated, so for this word list the search is exhaustive.`];
   }}
 function render(){
