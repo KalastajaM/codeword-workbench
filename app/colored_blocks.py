@@ -64,12 +64,15 @@ def photo_blocks(crops):
             if running * 2 >= count:
                 median = value
                 break
-        if median >= 240 or median < 120:
+        # Near-black cells are found as blocks elsewhere; mid-dark tints such as teal are found here.
+        if median >= 240 or median < 60:
             continue
         uniform = sum(hist[max(0, median-18):median+19]) / count
         width, height = gray.size
         data = list(gray.get_flattened_data() if hasattr(gray, 'get_flattened_data') else gray.getdata())
-        dark = [[value < 110 for value in data[y*width:(y+1)*width]] for y in range(height)]
+        # Ink is darker than the tint itself, which may be fairly dark.
+        threshold = min(110, median - 40)
+        dark = [[value < threshold for value in data[y*width:(y+1)*width]] for y in range(height)]
         # A slightly misaligned crop carries a sliver of the grid stroke along
         # its top or left edge. Strokes span the cell; printed digits do not.
         top, left = 0, 0

@@ -6,6 +6,11 @@ import math
 from .ocr import decode_image
 
 HANDLE_NAMES = ('topLeft', 'top', 'topRight', 'right', 'bottomRight', 'bottom', 'bottomLeft', 'left')
+CORNER_NAMES = ('topLeft', 'topRight', 'bottomRight', 'bottomLeft')
+# Each edge runs between two corners, in the direction its points are ordered.
+EDGES = {'top': ('topLeft', 'topRight'), 'right': ('topRight', 'bottomRight'),
+         'bottom': ('bottomLeft', 'bottomRight'), 'left': ('topLeft', 'bottomLeft')}
+MAX_EDGE_POINTS = 8
 MAX_SIDE = 2000
 MESH_TILES = 40
 # Keep some of the photo around the outline so its border strokes stay whole.
@@ -13,20 +18,32 @@ MARGIN = .02
 BANDS = 12
 
 
+def _point(value, width, height):
+    try:
+        x, y = float(value['x']), float(value['y'])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError('Each straightening handle needs x and y fractions.') from None
+    if not (math.isfinite(x) and math.isfinite(y)) or not (0 <= x <= 1 and 0 <= y <= 1):
+        raise ValueError('Straightening handles must lie inside the image.')
+    return x * width, y * height
+
+
 def _handles(value, width, height):
+    """Corner points and, per edge, the points it bends through (in pixels).
+
+    An edge holds one point (the original midpoint handle) or a list of
+    0..MAX_EDGE_POINTS points in any order.
+    """
     if not isinstance(value, dict) or set(value) != set(HANDLE_NAMES):
-        raise ValueError('Straightening needs the four grid corners and four edge midpoints.')
-    points = {}
-    for name in HANDLE_NAMES:
-        point = value[name]
-        try:
-            x, y = float(point['x']), float(point['y'])
-        except (KeyError, TypeError, ValueError):
-            raise ValueError('Each straightening handle needs x and y fractions.') from None
-        if not (math.isfinite(x) and math.isfinite(y)) or not (0 <= x <= 1 and 0 <= y <= 1):
-            raise ValueError('Straightening handles must lie inside the image.')
-        points[name] = (x * width, y * height)
-    corners = [points[name] for name in ('topLeft', 'topRight', 'bottomRight', 'bottomLeft')]
+        raise ValueError('Straightening needs the four grid corners and the four edges.')
+    points = {name: _point(value[name], width, height) for name in CORNER_NAMES}
+    for name in EDGES:
+        edge = value[name]
+        edge = [edge] if isinstance(edge, dict) else edge
+        if not isinstance(edge, list) or len(edge) > MAX_EDGE_POINTS:
+            raise ValueError(f'Each edge takes at most {MAX_EDGE_POINTS} bend points.')
+        points[name] = [_point(item, width, height) for item in edge]
+    corners = [points[name] for name in CORNER_NAMES]
     turns = [(b[0]-a[0])*(c[1]-b[1]) - (b[1]-a[1])*(c[0]-b[0])
              for a, b, c in zip(corners, corners[1:] + corners[:1], corners[2:] + corners[:2])]
     area = sum(a[0]*b[1] - b[0]*a[1] for a, b in zip(corners, corners[1:] + corners[:1])) / 2
@@ -36,14 +53,116 @@ def _handles(value, width, height):
     return points
 
 
-def _edge(start, middle, end):
-    """Quadratic curve from start to end that passes through middle at t=0.5."""
-    control = (2*middle[0] - (start[0]+end[0])/2, 2*middle[1] - (start[1]+end[1])/2)
+def _projective(tl, tr, br, bl):
+    """3x3 map from the unit square to the corner quadrilateral (Heckbert)."""
+    (x0, y0), (x1, y1), (x2, y2), (x3, y3) = tl, tr, br, bl
+    dx1, dx2, dx3 = x1-x2, x3-x2, x0-x1+x2-x3
+    dy1, dy2, dy3 = y1-y2, y3-y2, y0-y1+y2-y3
+    det = dx1*dy2 - dx2*dy1
+    g, h = (dx3*dy2 - dx2*dy3) / det, (dx1*dy3 - dx3*dy1) / det
+    return ((x1-x0+g*x1, x3-x0+h*x3, x0), (y1-y0+g*y1, y3-y0+h*y3, y0), (g, h, 1))
+
+
+def _apply(matrix, x, y):
+    (a, b, c), (d, e, f), (g, h, i) = matrix
+    w = g*x + h*y + i
+    return ((a*x + b*y + c) / w, (d*x + e*y + f) / w)
+
+
+def _inverse(matrix):
+    (a, b, c), (d, e, f), (g, h, i) = matrix
+    return ((e*i - f*h, c*h - b*i, b*f - c*e), (f*g - d*i, a*i - c*g, c*d - a*f), (d*h - e*g, b*g - a*h, a*e - b*d))
+
+
+def _spline(knots):
+    """Smooth curve through (t, value) knots: the parabola or cubic through
+    three or four knots, a not-a-knot cubic spline through more."""
+    ts = [t for t, _ in knots]
+    if len(knots) == 2:
+        (t0, y0), (t1, y1) = knots
+        return lambda t: y0 + (y1 - y0) * (t - t0) / (t1 - t0)
+    if len(knots) <= 4:
+        def lagrange(t):
+            total = 0.0
+            for i, (ti, yi) in enumerate(knots):
+                term = yi
+                for j, tj in enumerate(ts):
+                    if j != i:
+                        term *= (t - tj) / (ti - tj)
+                total += term
+            return total
+        return lagrange
+    n = len(knots) - 1
+    hs = [ts[i+1] - ts[i] for i in range(n)]
+    ys = [y for _, y in knots]
+    # Second derivatives M solve a small linear system; not-a-knot ends keep
+    # the third derivative continuous at the second and second-last knots.
+    rows = [[0.0]*(n+1) + [0.0] for _ in range(n+1)]
+    rows[0][0], rows[0][1], rows[0][2] = hs[1], -(hs[0] + hs[1]), hs[0]
+    rows[n][n-2], rows[n][n-1], rows[n][n] = hs[n-1], -(hs[n-2] + hs[n-1]), hs[n-2]
+    for i in range(1, n):
+        rows[i][i-1], rows[i][i], rows[i][i+1] = hs[i-1], 2*(hs[i-1] + hs[i]), hs[i]
+        rows[i][n+1] = 6*((ys[i+1] - ys[i])/hs[i] - (ys[i] - ys[i-1])/hs[i-1])
+    for col in range(n+1):
+        pivot = max(range(col, n+1), key=lambda r: abs(rows[r][col]))
+        rows[col], rows[pivot] = rows[pivot], rows[col]
+        for r in range(n+1):
+            if r != col and rows[r][col]:
+                factor = rows[r][col] / rows[col][col]
+                rows[r] = [a - factor*b for a, b in zip(rows[r], rows[col])]
+    ms = [rows[i][n+1] / rows[i][i] for i in range(n+1)]
 
     def at(t):
-        a, b, c = (1-t)**2, 2*t*(1-t), t*t
-        return (a*start[0] + b*control[0] + c*end[0], a*start[1] + b*control[1] + c*end[1])
+        i = min(n-1, max(0, next((k for k in range(n) if t < ts[k+1]), n-1)))
+        h, a, b = hs[i], ts[i+1] - t, t - ts[i]
+        return (ms[i]*a**3/(6*h) + ms[i+1]*b**3/(6*h) + (ys[i]/h - ms[i]*h/6)*a + (ys[i+1]/h - ms[i+1]*h/6)*b)
     return at
+
+
+def _bend(points, start, end, base, along, plane):
+    """Offset of a bowed edge from the camera plane, as a function of the edge parameter.
+
+    Each point is placed along the edge by the inverse camera map, so cells
+    stay evenly spaced under perspective; only its offset across the chord
+    bends the edge, so sliding a point along the border changes nothing.
+    """
+    cx, cy = end[0]-start[0], end[1]-start[1]
+    length = math.hypot(cx, cy)
+    nx, ny = -cy/length, cx/length
+    inverse = _inverse(plane)
+    knots = [(0.0, 0.0), (1.0, 0.0)]
+    for x, y in points:
+        u, v = _apply(inverse, x, y)
+        t = (u, v)[along]
+        if not .02 <= t <= .98:
+            raise ValueError('Keep each edge point between the two corners of its edge.')
+        bx, by = _apply(plane, *base(t))
+        knots.append((t, (x - bx)*nx + (y - by)*ny))
+    knots.sort()
+    if any(b[0] - a[0] < .02 for a, b in zip(knots, knots[1:])):
+        raise ValueError('Edge points are too close together; spread them out or remove one.')
+    amount = _spline(knots)
+    return lambda t: (amount(t)*nx, amount(t)*ny)
+
+
+# Unit-square position of each edge at parameter t.
+EDGE_AT = {'top': lambda t: (t, 0), 'right': lambda t: (1, t), 'bottom': lambda t: (t, 1), 'left': lambda t: (0, t)}
+
+
+def _surface(p):
+    """Source pixel for each unit-square position: camera plane plus edge bowing."""
+    plane = _projective(*(p[name] for name in CORNER_NAMES))
+    bends = {name: _bend(p[name], p[start], p[end], EDGE_AT[name], 0 if name in ('top', 'bottom') else 1, plane)
+             for name, (start, end) in EDGES.items()}
+
+    def source(u, v):
+        x, y = _apply(plane, u, v)
+        # A Coons patch: each edge's offset fades linearly towards the opposite edge.
+        for name, weight, t in (('top', 1-v, u), ('bottom', v, u), ('left', 1-u, v), ('right', u, v)):
+            dx, dy = bends[name](t)
+            x, y = x + weight*dx, y + weight*dy
+        return x, y
+    return source
 
 
 def _length(curve, steps=64):
@@ -51,54 +170,19 @@ def _length(curve, steps=64):
     return sum(math.dist(a, b) for a, b in zip(points, points[1:]))
 
 
-def _perspective(tl, tr, br, bl):
-    """Projective map from the unit square to the corner quadrilateral (Heckbert)."""
-    (x0, y0), (x1, y1), (x2, y2), (x3, y3) = tl, tr, br, bl
-    dx1, dx2, dx3 = x1-x2, x3-x2, x0-x1+x2-x3
-    dy1, dy2, dy3 = y1-y2, y3-y2, y0-y1+y2-y3
-    det = dx1*dy2 - dx2*dy1
-    g, h = (dx3*dy2 - dx2*dy3) / det, (dx1*dy3 - dx3*dy1) / det
-    a, b, d, e = x1-x0+g*x1, x3-x0+h*x3, y1-y0+g*y1, y3-y0+h*y3
-
-    def at(u, v):
-        w = g*u + h*v + 1
-        return ((a*u + b*v + x0) / w, (d*u + e*v + y0) / w)
-    return at
-
-
-def _bend(middle, start, end, plane_middle):
-    """Offset of a bowed edge midpoint across its chord; ignore sliding along it."""
-    cx, cy = end[0]-start[0], end[1]-start[1]
-    length = math.hypot(cx, cy)
-    nx, ny = -cy/length, cx/length
-    amount = (middle[0]-plane_middle[0])*nx + (middle[1]-plane_middle[1])*ny
-    return amount*nx, amount*ny
+def outline(handles, width, height, steps=32):
+    """The flattened border in image fractions, edge by edge, for tests and previews."""
+    source = _surface(_handles(handles, width, height))
+    return {name: [(x / width, y / height) for x, y in (source(*at(i/steps)) for i in range(steps+1))]
+            for name, at in EDGE_AT.items()}
 
 
 def straighten_image(image, handles):
-    """Undo camera perspective from the corners, then page bowing from the edge midpoints."""
+    """Undo camera perspective from the corners, then page bowing from the edge points."""
     from PIL import Image
-    p = _handles(handles, image.width, image.height)
-    top = _edge(p['topLeft'], p['top'], p['topRight'])
-    bottom = _edge(p['bottomLeft'], p['bottom'], p['bottomRight'])
-    left = _edge(p['topLeft'], p['left'], p['bottomLeft'])
-    right = _edge(p['topRight'], p['right'], p['bottomRight'])
-    tl, tr, br, bl = p['topLeft'], p['topRight'], p['bottomRight'], p['bottomLeft']
-    plane = _perspective(tl, tr, br, bl)
-    # Equal steps on a tilted page shrink with distance, so cells stay evenly
-    # spaced only under the projective map, not under arc-length interpolation.
-    bends = [_bend(p['top'], tl, tr, plane(.5, 0)), _bend(p['bottom'], bl, br, plane(.5, 1)),
-             _bend(p['left'], tl, bl, plane(0, .5)), _bend(p['right'], tr, br, plane(1, .5))]
-
-    def source(u, v):
-        x, y = plane(u, v)
-        bu, bv = 4*u*(1-u), 4*v*(1-v)
-        weights = ((1-v)*bu, v*bu, (1-u)*bv, u*bv)
-        return (x + sum(w*b[0] for w, b in zip(weights, bends)),
-                y + sum(w*b[1] for w, b in zip(weights, bends)))
-
-    width = (_length(top) + _length(bottom)) / 2
-    height = (_length(left) + _length(right)) / 2
+    source = _surface(_handles(handles, image.width, image.height))
+    width = (_length(lambda t: source(t, 0)) + _length(lambda t: source(t, 1))) / 2
+    height = (_length(lambda t: source(0, t)) + _length(lambda t: source(1, t))) / 2
     scale = min(1, MAX_SIDE / (max(width, height) * (1 + 2*MARGIN)))
     width = max(1, round(width * scale * (1 + 2*MARGIN)))
     height = max(1, round(height * scale * (1 + 2*MARGIN)))

@@ -7,7 +7,7 @@ from unittest.mock import patch
 from PIL import Image, ImageDraw
 
 from app.ocr import recognize
-from app.straighten import HANDLE_NAMES, straighten, straighten_image
+from app.straighten import HANDLE_NAMES, MARGIN, outline, straighten, straighten_image
 
 ROWS, COLS, PITCH = 23, 20, 50
 BLACK = {(0, 3), (2, 7), (5, 0), (6, 14), (9, 9), (11, 4), (22, 19), (17, 12)}
@@ -22,9 +22,14 @@ def data_url(image):
     return 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode()
 
 
-def photographed(x, y):
-    """Map flat grid coordinates to a tilted, bent photograph of the page."""
+def photographed(x, y, hook=0):
+    """Map flat grid coordinates to a tilted, bent photograph of the page.
+
+    `hook` curls the top border down near the spine, a shape a single
+    midpoint per edge cannot follow.
+    """
     width, height = COLS * PITCH, ROWS * PITCH
+    y += hook * (max(0, x / width - .6) / .4) ** 2 * (1 - y / height) ** 2
     # A curled page compresses some columns more than others; no single
     # perspective map can make these widths equal again.
     x += 22 * math.sin(2 * math.pi * x / width)
@@ -36,11 +41,13 @@ def photographed(x, y):
     return (120 + (x + .06 * y) / denominator * 1.05, 90 + (y + .03 * x) / denominator)
 
 
-def photo_fixture():
+def photo_fixture(hook=0):
+    def place(x, y):
+        return photographed(x, y, hook)
     image = Image.new('RGB', (1300, 1000), (205, 200, 190))
     draw = ImageDraw.Draw(image)
     width, height = COLS * PITCH, ROWS * PITCH
-    draw.polygon([photographed(x, y) for x, y in
+    draw.polygon([place(x, y) for x, y in
                   [(t, 0) for t in range(0, width + 1, 10)] + [(width, t) for t in range(0, height + 1, 10)]
                   + [(t, height) for t in range(width, -1, -10)] + [(0, t) for t in range(height, -1, -10)]],
                  fill='white')
@@ -48,19 +55,45 @@ def photo_fixture():
         for r, c in cells:
             quad = [(c * PITCH + dx, r * PITCH + dy) for dx, dy in
                     [(0, 0), (PITCH, 0), (PITCH, PITCH), (0, PITCH)]]
-            draw.polygon([photographed(*p) for p in quad], fill=fill)
+            draw.polygon([place(*p) for p in quad], fill=fill)
     r, c = NUMBERED_TINT
-    corner = photographed(c * PITCH + 6, r * PITCH + 5)
+    corner = place(c * PITCH + 6, r * PITCH + 5)
     draw.rectangle((corner[0], corner[1], corner[0] + 3, corner[1] + 13), fill='black')
     for c in range(COLS + 1):
-        draw.line([photographed(c * PITCH, t) for t in range(0, height + 1, 6)], fill='black', width=3)
+        draw.line([place(c * PITCH, t) for t in range(0, height + 1, 6)], fill='black', width=3)
     for r in range(ROWS + 1):
-        draw.line([photographed(t, r * PITCH) for t in range(0, width + 1, 6)], fill='black', width=3)
+        draw.line([place(t, r * PITCH) for t in range(0, width + 1, 6)], fill='black', width=3)
     handles = {}
     for name, (fx, fy) in zip(HANDLE_NAMES, [(0, 0), (.5, 0), (1, 0), (1, .5), (1, 1), (.5, 1), (0, 1), (0, .5)]):
-        x, y = photographed(fx * width, fy * height)
+        x, y = place(fx * width, fy * height)
         handles[name] = {'x': x / image.width, 'y': y / image.height}
     return image, handles
+
+
+def edge_points(count, hook=0):
+    """Handles with `count` bend points per edge, sampled from the photographed page."""
+    image, handles = photo_fixture(hook)
+    width, height = COLS * PITCH, ROWS * PITCH
+    steps = [(k + 1) / (count + 1) for k in range(count)]
+    for name, at in (('top', lambda t: (t, 0)), ('right', lambda t: (1, t)),
+                     ('bottom', lambda t: (t, 1)), ('left', lambda t: (0, t))):
+        points = [photographed(at(t)[0] * width, at(t)[1] * height, hook) for t in steps]
+        handles[name] = [{'x': x / image.width, 'y': y / image.height} for x, y in points]
+    return image, handles
+
+
+def top_border_error(flat):
+    """Largest distance of the flattened top border from where an even grid puts it."""
+    gray = flat.convert('L')
+    pixels = gray.load()
+    expected = MARGIN / (1 + 2*MARGIN) * flat.height
+    errors = []
+    for k in range(1, 20):
+        x = round(flat.width * k / 20)
+        y = min(range(round(expected) - 30, round(expected) + 31),
+                key=lambda y: sum(pixels[x + d, y] for d in range(-2, 3)))
+        errors.append(abs(y - expected))
+    return max(errors)
 
 
 class StraightenTests(unittest.TestCase):
@@ -131,6 +164,30 @@ class StraightenTests(unittest.TestCase):
         result = straighten({'image': image, 'handles': handles})
         self.assertEqual((result['rows'], result['cols']), (ROWS, COLS))
 
+    def test_more_edge_points_follow_a_curled_border(self):
+        photo, one = photo_fixture(hook=44)
+        _, many = edge_points(5, hook=44)
+        rough, close = top_border_error(straighten_image(photo, one)), top_border_error(straighten_image(photo, many))
+        # A single midpoint per edge leaves the hooked corner of the border bent.
+        self.assertGreater(rough, 4)
+        self.assertLessEqual(close, 2)
+
+    def test_outline_passes_through_every_edge_point_in_any_order(self):
+        photo, handles = edge_points(4)
+        handles['top'] = handles['top'][::-1]
+        border = outline(handles, photo.width, photo.height, steps=400)
+        for name in ('top', 'right', 'bottom', 'left'):
+            for point in handles[name]:
+                with self.subTest(edge=name):
+                    gap = min(math.dist((point['x'] * photo.width, point['y'] * photo.height),
+                                        (x * photo.width, y * photo.height)) for x, y in border[name])
+                    self.assertLess(gap, 2)
+
+    def test_straight_edges_need_no_points(self):
+        photo, handles = photo_fixture()
+        handles.update(top=[], right=[], bottom=[], left=[])
+        self.assertEqual(straighten({'image': data_url(photo), 'handles': handles})['image'][:22], 'data:image/jpeg;base64')
+
     def test_invalid_handles_are_rejected(self):
         photo, handles = photo_fixture()
         image = data_url(photo)
@@ -139,7 +196,11 @@ class StraightenTests(unittest.TestCase):
         outside = dict(handles, topLeft={'x': -.2, 'y': .1})
         collapsed = {name: {'x': .5, 'y': .5} for name in HANDLE_NAMES}
         crossed = dict(handles, topLeft=handles['bottomRight'], bottomRight=handles['topLeft'])
-        for bad in [None, [], missing, outside, collapsed, crossed,
+        _, many = edge_points(3)
+        crowded = dict(many, top=many['top'] + [dict(many['top'][0], x=many['top'][0]['x'] + .001)])
+        beyond = dict(many, top=many['top'] + [{'x': .01, 'y': handles['topLeft']['y']}])
+        too_many = dict(many, left=many['left'] * 3)
+        for bad in [None, [], missing, outside, collapsed, crossed, crowded, beyond, too_many, dict(handles, top='a'),
                     dict(handles, top={'x': 'a', 'y': .1}), dict(handles, top={'x': float('nan'), 'y': .1})]:
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 straighten({'image': image, 'handles': bad})

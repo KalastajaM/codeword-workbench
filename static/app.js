@@ -621,24 +621,50 @@ $('dictionary-file').onchange=protect(async event=>{
 $('save-dictionary').onclick=protect(()=>dictionaryEditor.save(dictionaryPages.text()));
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
 $('demo').onclick=async()=>{if((puzzle.image||puzzle.cells.some(c=>c.number||c.letter||c.guess||c.black))&&!await confirmAction('Replace this workspace with the example? Save first to keep current work.'))return;const demo=fresh(3,3);demo.name='First steps · word square';const letters='CATARETEN',mapping={C:'1',A:'2',T:'3',R:'4',E:'5',N:'6'};demo.cells=demo.cells.map((c,i)=>({...c,number:mapping[letters[i]],letter:i===0?'C':'',openBeforeAcross:false,openAfterAcross:false,openBeforeDown:false,openAfterDown:false}));setPuzzle(demo);notify('Example loaded: a small word square. Click Solve, then review and accept suggestions.');};
+function straightenSize(){const image=$('puzzle-image');return [image.naturalWidth||1,image.naturalHeight||1];}
 function renderStraighten(){
  if(!puzzle.image)straightenHandles=null;
  const active=!!straightenHandles;$('board-stage').classList.toggle('straightening',active);$('straighten-overlay').hidden=!active;$('straighten-panel').hidden=!active;$('straighten-photo').hidden=active;
  $('straighten-apply').disabled=$('straighten-cancel').disabled=straightenBusy;
  if(!active)return;
- $('straighten-outline').setAttribute('d',Straighten.outlinePath(straightenHandles));
- for(const name of Straighten.HANDLE_NAMES){const handle=$('handle-'+name);handle.style.left=straightenHandles[name].x*100+'%';handle.style.top=straightenHandles[name].y*100+'%';}
+ const [width,height]=straightenSize(),paths=Straighten.edgePaths(straightenHandles,width,height);
+ $('straighten-outline').setAttribute('d',Straighten.outlinePath(straightenHandles,width,height));
+ for(const edge of Straighten.EDGE_NAMES)$('straighten-hit-'+edge).setAttribute('d',paths[edge]);
+ // Edge point buttons are rebuilt only when points are added or removed, never during a drag.
+ const layout=Straighten.EDGE_NAMES.map(edge=>straightenHandles[edge].length).join();
+ if($('straighten-overlay').dataset.layout!==layout){
+  $('straighten-overlay').dataset.layout=layout;$('straighten-overlay').querySelectorAll('.straighten-handle.middle').forEach(handle=>handle.remove());
+  for(const edge of Straighten.EDGE_NAMES)straightenHandles[edge].forEach((_,index)=>straightenHandle('handle-'+edge+'-'+index,`${edge} edge point ${index+1} handle (Delete removes it)`,true,
+   ()=>straightenHandles[edge][index],(handles,x,y)=>Straighten.moveEdgePoint(handles,edge,index,x,y),()=>Straighten.removeEdgePoint(straightenHandles,edge,index)));
+ }
+ for(const name of Straighten.CORNERS)placeStraightenHandle($('handle-'+name),straightenHandles[name]);
+ for(const edge of Straighten.EDGE_NAMES)straightenHandles[edge].forEach((point,index)=>placeStraightenHandle($('handle-'+edge+'-'+index),point));
 }
-for(const name of Straighten.HANDLE_NAMES){
- const handle=document.createElement('button'),corner=!['top','right','bottom','left'].includes(name);
- handle.type='button';handle.id='handle-'+name;handle.className='straighten-handle'+(corner?'':' middle');
- handle.setAttribute('aria-label',(corner?name.replace(/([A-Z])/,' $1').toLowerCase()+' corner':name+' edge middle')+' handle');
- const moveTo=event=>{const box=$('straighten-overlay').getBoundingClientRect();straightenHandles=Straighten.moveHandle(straightenHandles,name,(event.clientX-box.left)/box.width,(event.clientY-box.top)/box.height);renderStraighten();};
+function placeStraightenHandle(handle,point){handle.style.left=point.x*100+'%';handle.style.top=point.y*100+'%';}
+function straightenHandle(id,label,middle,point,move,remove){
+ const handle=document.createElement('button');
+ handle.type='button';handle.id=id;handle.className='straighten-handle'+(middle?' middle':'');handle.setAttribute('aria-label',label);
+ const moveTo=event=>{const box=$('straighten-overlay').getBoundingClientRect();straightenHandles=move(straightenHandles,(event.clientX-box.left)/box.width,(event.clientY-box.top)/box.height);renderStraighten();};
+ const removeHandle=()=>{if(!remove||straightenBusy)return;straightenHandles=remove();renderStraighten();};
  handle.onpointerdown=event=>{if(straightenBusy)return;event.preventDefault();handle.setPointerCapture(event.pointerId);handle.onpointermove=moveTo;};
  handle.onpointerup=handle.onpointercancel=()=>{handle.onpointermove=null;};
- handle.onkeydown=event=>{const step=event.shiftKey?.01:.002,d={ArrowLeft:[-step,0],ArrowRight:[step,0],ArrowUp:[0,-step],ArrowDown:[0,step]}[event.key];if(!d||straightenBusy)return;event.preventDefault();const p=straightenHandles[name];straightenHandles=Straighten.moveHandle(straightenHandles,name,p.x+d[0],p.y+d[1]);renderStraighten();};
+ handle.ondblclick=removeHandle;
+ handle.onkeydown=event=>{
+  if(event.key==='Delete'||event.key==='Backspace'){event.preventDefault();removeHandle();return;}
+  const step=event.shiftKey?.01:.002,d={ArrowLeft:[-step,0],ArrowRight:[step,0],ArrowUp:[0,-step],ArrowDown:[0,step]}[event.key];if(!d||straightenBusy)return;event.preventDefault();
+  const p=point();straightenHandles=move(straightenHandles,p.x+d[0],p.y+d[1]);renderStraighten();};
  $('straighten-overlay').append(handle);
+ return handle;
 }
+for(const name of Straighten.CORNERS)straightenHandle('handle-'+name,name.replace(/([A-Z])/,' $1').toLowerCase()+' corner handle',false,()=>straightenHandles[name],(handles,x,y)=>Straighten.moveCorner(handles,name,x,y));
+// Clicking the outline adds a bend point there, so a strongly curved edge can be followed closely.
+for(const edge of Straighten.EDGE_NAMES)$('straighten-hit-'+edge).onclick=event=>{
+ if(!straightenHandles||straightenBusy)return;
+ const box=$('straighten-overlay').getBoundingClientRect(),[width,height]=straightenSize();
+ const added=Straighten.addEdgePoint(straightenHandles,edge,(event.clientX-box.left)/box.width,(event.clientY-box.top)/box.height,width,height);
+ if(added.error)return notify(added.error);
+ straightenHandles=added.handles;renderStraighten();$('handle-'+edge+'-'+added.index).focus();
+};
 $('straighten-photo').onclick=()=>{if(!puzzle.image||!editMode)return;straightenHandles=Straighten.defaultHandles();fitMode='puzzle';updateView();renderStraighten();$('board-stage').scrollIntoView({block:'nearest'});};
 $('straighten-cancel').onclick=()=>{straightenHandles=null;renderStraighten();};
 $('straighten-apply').onclick=protect(async()=>{
