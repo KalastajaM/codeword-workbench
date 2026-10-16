@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Codeword Solver Walkthrough</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: one reading column; the step-through widens into a grid | candidates | tree workbench. */
+:root{
+  --paper:#edf1f6; --sheet:#ffffff; --ink:#13213a; --muted:#56667c; --rule:#cad4e0;
+  --teal:#0d8473; --teal-soft:#d9f1ec; --focus:#b7790c; --focus-soft:#fbefd5;
+  --dead:#b0442c; --ok:#1d7548; --black:#13213a;
+  --display:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+  --body:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0b1220; --sheet:#121d2e; --ink:#e6edf5; --muted:#94a8bd; --rule:#26364b;
+  --teal:#62dec5; --teal-soft:#14343a; --focus:#f2c14e; --focus-soft:#3a3018;
+  --dead:#f08a6c; --ok:#6fd49b; --black:#05090f; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#0b1220; --sheet:#121d2e; --ink:#e6edf5; --muted:#94a8bd; --rule:#26364b;
+  --teal:#62dec5; --teal-soft:#14343a; --focus:#f2c14e; --focus-soft:#3a3018;
+  --dead:#f08a6c; --ok:#6fd49b; --black:#05090f; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.6 var(--body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:1080px;margin:0 auto;padding-block:40px 64px;display:grid;gap:56px}
+h1,h2,h3{font-family:var(--display);font-weight:600;line-height:1.2;text-wrap:balance;margin:0}
+h1{font-size:clamp(30px,5vw,44px)} h2{font-size:26px} h3{font-size:17px}
+p{margin:0;max-width:68ch} code,.mono{font-family:var(--mono);font-size:.9em}
+.eyebrow{font:600 12px/1 var(--body);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+section{display:grid;gap:18px} .lede{font-size:17px;color:var(--muted)}
+header{display:grid;gap:14px}
+.sheet{background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:20px}
+/* pipeline */
+.flow{display:grid;gap:10px}
+.stage{background:var(--sheet);border:1px solid var(--rule);border-radius:8px;padding:12px 14px;display:grid;gap:4px;min-width:0}
+.stage b{font-family:var(--display);font-size:16px}
+.stage small{color:var(--muted);font-size:13px;line-height:1.45}
+.stage .fn{font-family:var(--mono);font-size:11.5px;color:var(--teal)}
+.down{justify-self:center;width:2px;height:16px;background:var(--rule);position:relative}
+.down::after{content:"";position:absolute;left:-4px;bottom:-2px;border:5px solid transparent;border-top-color:var(--rule)}
+.fork{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;align-items:start}
+.lane{display:grid;gap:8px;border-top:3px solid var(--rule);padding-top:10px;min-width:0}
+.lane[data-k="strict"]{border-color:var(--teal)} .lane[data-k="missing"]{border-color:var(--focus)} .lane[data-k="anneal"]{border-color:var(--muted)}
+.lane .cond{font-size:12.5px;color:var(--muted)}
+/* workbench */
+.bench{display:grid;grid-template-columns:auto minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:760px){.bench{grid-template-columns:minmax(0,1fr)}}
+.left{display:grid;gap:16px;justify-items:start}
+.grid{display:grid;grid-template-columns:repeat(3,64px);grid-template-rows:repeat(3,64px);border:2px solid var(--ink);background:var(--ink);gap:2px}
+.cell{position:relative;background:var(--sheet);border:0;padding:0;font:600 30px/64px var(--mono);color:var(--teal);text-align:center;cursor:pointer}
+.cell .n{position:absolute;left:5px;top:3px;font:500 11px/1 var(--mono);color:var(--muted)}
+.cell.given{color:var(--ink);font-weight:800}
+.cell.given::after{content:"";position:absolute;inset:auto 8px 6px;height:2px;background:var(--ink)}
+.cell.hot{background:var(--focus-soft)} .cell.new{animation:pop .5s ease}
+.cell:focus-visible{outline:3px solid var(--focus);outline-offset:-3px}
+@keyframes pop{from{background:var(--teal-soft)}}
+.hint{font-size:12.5px;color:var(--muted);max-width:28ch}
+table{border-collapse:collapse;font-variant-numeric:tabular-nums}
+.support th,.support td{border:1px solid var(--rule);padding:3px 8px;font:13px var(--mono);text-align:center}
+.support th{color:var(--muted);font-weight:500}
+.support td.one{color:var(--teal);font-weight:700}
+.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.slot{border:1px solid var(--rule);border-radius:8px;padding:8px 10px;display:grid;gap:6px;align-content:start;min-width:0}
+.slot.hot{border-color:var(--focus);background:var(--focus-soft)}
+.slot.fail{border-color:var(--dead)}
+.slot h4{margin:0;font:600 12.5px var(--body);display:flex;justify-content:space-between;gap:6px}
+.slot h4 span{color:var(--muted);font-weight:500}
+.words{display:flex;flex-wrap:wrap;gap:4px}
+.w{font:600 12.5px var(--mono);padding:1px 5px;border-radius:4px;background:var(--teal-soft);color:var(--ink)}
+.w.gone{background:none;color:var(--muted);text-decoration:line-through;font-weight:400}
+.w.try{background:var(--focus);color:var(--sheet)}
+.slot .done{font-size:12px;color:var(--ok)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button.b{font:600 13.5px var(--body);border:1px solid var(--rule);background:var(--sheet);color:var(--ink);border-radius:6px;padding:7px 12px;cursor:pointer}
+button.b:hover{border-color:var(--teal)} button.b:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+button.b.primary{background:var(--teal);border-color:var(--teal);color:var(--sheet)}
+button.b:disabled{opacity:.45;cursor:default}
+input[type=range]{flex:1 1 160px;accent-color:var(--teal)}
+.counter{font:13px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.narr{border-left:3px solid var(--teal);padding:4px 0 4px 14px;display:grid;gap:6px;min-height:84px}
+.narr.dead{border-color:var(--dead)} .narr.solution{border-color:var(--ok)} .narr.choose,.narr.branch{border-color:var(--focus)}
+.narr .tag{font:700 11px/1 var(--body);letter-spacing:.08em;text-transform:uppercase}
+.narr.dead .tag{color:var(--dead)} .narr.solution .tag{color:var(--ok)} .narr .tag{color:var(--teal)} .narr.choose .tag,.narr.branch .tag{color:var(--focus)}
+.treebox{overflow-x:auto} .treebox svg{display:block}
+.stats{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--muted)}
+.stats b{color:var(--ink);font-variant-numeric:tabular-nums}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+.two>*{min-width:0}
+ul{margin:0;padding-left:20px;display:grid;gap:6px;max-width:68ch}
+.chart{width:100%;height:auto;display:block}
+.chart text{fill:var(--muted);font:11px var(--body)}
+.budgets{overflow-x:auto}
+.budgets table{width:100%;min-width:480px}
+.budgets th,.budgets td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--rule);font-size:14px}
+.budgets th{font-weight:600;color:var(--muted);font-size:12.5px;text-transform:uppercase;letter-spacing:.06em}
+.budgets td.num{font-family:var(--mono);text-align:right}
+.note{font-size:13px;color:var(--muted);max-width:80ch}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--muted);align-items:center}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+@media (prefers-reduced-motion:reduce){.cell.new{animation:none}}
+</style>
+
+<main>
+<header>
+  <span class="eyebrow">Codeword Workbench · app/solver.py</span>
+  <h1>How the solver fills a codeword grid</h1>
+  <p class="lede">Every playable cell holds a number, and every number stands for one letter. The solver turns the grid into word slots, finds words that fit each slot, and searches for an assignment where all crossing words and number mappings agree. This page shows the stages, then lets you step through a real search.</p>
+</header>
+
+<section aria-labelledby="pipe">
+  <span class="eyebrow">1 · Pipeline</span>
+  <h2 id="pipe">From grid to ranked alternatives</h2>
+  <div class="flow">
+    <div class="stage"><b>Validate the puzzle</b><small>Grid size, numbers 1–999, one letter per cell from the alphabet, and confirmed letters that respect the mapping rules, ruled-out letters and forbidden patterns. A conflict stops here.</small><span class="fn">validate()</span></div>
+    <div class="down"></div>
+    <div class="stage"><b>Spread confirmed mappings</b><small>A confirmed letter on number 7 fills every other cell numbered 7. These forced letters are reported even when no full solution is found.</small><span class="fn">_propagate()</span></div>
+    <div class="down"></div>
+    <div class="stage"><b>Cut the grid into slots</b><small>Runs of two or more open cells, across and down. Open-ended slots (a word that continues outside the grid) match fragments of longer words instead of whole words.</small><span class="fn">_slots()</span></div>
+    <div class="down"></div>
+    <div class="fork">
+      <div class="lane" data-k="strict">
+        <span class="cond">Use dictionary on</span>
+        <div class="stage"><b>Index the word list</b><small>Keeps only lengths the grid needs, then buckets words by length and by repeated-letter pattern. A slot numbered 4 9 9 4 only sees words shaped ABBA.</small><span class="fn">WordIndex</span></div>
+        <div class="stage"><b>Collect candidates per slot</b><small>Words compatible with confirmed letters and mappings, plus Finnish inflected forms when enabled. Ranked by the letter model; the top 500 enter strict search.</small><span class="fn">index.candidates()</span></div>
+        <div class="stage"><b>Strict constraint search</b><small>Propagate crossings and shared numbers to a fixed point, branch on the slot with the fewest candidates, backtrack on contradictions. Stops at 12 alternatives.</small><span class="fn">_constraint_search()</span></div>
+      </div>
+      <div class="lane" data-k="missing">
+        <span class="cond">Allow missing words on, strict search found nothing</span>
+        <div class="stage"><b>Strict search gets a fifth</b><small>Strict search runs with 20% of the time and nodes, so the fallback keeps most of the budget.</small><span class="fn">_solve()</span></div>
+        <div class="stage"><b>Missing-word branch and bound</b><small>Each slot either takes a listed word or is left unsupported at a cost of one. The search minimises that cost. Unsupported words get letters only from crossings and mappings.</small><span class="fn">_missing_word_search()</span></div>
+      </div>
+      <div class="lane" data-k="anneal">
+        <span class="cond">Use dictionary off</span>
+        <div class="stage"><b>Global mapping annealing</b><small>Assigns a letter to every number at once and improves the whole grid's letter-model score by random swaps with a cooling temperature. Results are unverified letter sequences.</small><span class="fn">_global_heuristic()</span></div>
+      </div>
+    </div>
+    <div class="down"></div>
+    <div class="stage"><b>Rank and label</b><small>Alternatives sort by number of dictionary-supported words, then letter-model score. Each word is labelled dictionary, morphology, fragment or unverified, with a Typical / Unusual / Implausible pattern check. Status says whether time, nodes, the alternative limit or exhaustion ended the search.</small><span class="fn">annotate_plausibility()</span></div>
+  </div>
+</section>
+
+<section aria-labelledby="step">
+  <span class="eyebrow">2 · Strict search, step by step</span>
+  <h2 id="step">Watch propagation and backtracking</h2>
+  <p>A 3 × 3 codeword with five numbers, solved against the app's bundled English demonstration list (30 three-letter words). Candidates are tried in the order the real solver uses: highest letter-model score first. Click a cell to confirm or release its letter and the search reruns.</p>
+  <div class="sheet bench">
+    <div class="left">
+      <div class="grid" id="grid" role="group" aria-label="Puzzle grid"></div>
+      <p class="hint">Underlined letters are confirmed. Teal letters are provisional search results.</p>
+      <table class="support" aria-label="Letters still possible for each number"><thead><tr id="supH"></tr></thead><tbody><tr id="supB"></tr></tbody></table>
+      <p class="hint">Letters each number can still take, from the intersection of all slot candidates.</p>
+    </div>
+    <div style="display:grid;gap:16px;min-width:0">
+      <div class="controls">
+        <button class="b" id="first" aria-label="First step">⏮</button>
+        <button class="b" id="prev" aria-label="Previous step">◀</button>
+        <button class="b primary" id="play">Play</button>
+        <button class="b" id="next" aria-label="Next step">▶</button>
+        <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Step">
+        <span class="counter" id="count"></span>
+      </div>
+      <div class="narr" id="narr" aria-live="polite"></div>
+      <div class="slots" id="slots"></div>
+      <div>
+        <div class="legend"><span><i class="sw" style="background:var(--focus)"></i>branch being tried</span><span><i class="sw" style="background:var(--dead)"></i>contradiction</span><span><i class="sw" style="background:var(--ok)"></i>solution</span></div>
+        <div class="treebox" id="tree"></div>
+      </div>
+      <div class="stats" id="stats"></div>
+    </div>
+  </div>
+  <p class="note">The step-through runs a compact JavaScript port of the strict search in this page (one letter per number, unique letters, closed slots). For every one of the 32 combinations of confirmed numbers it visits the same search nodes and propagation rounds and returns the same solutions as <code>app/solver.py</code>; the starting example takes 4 nodes and 6 rounds. The real solver adds budgets, open-ended fragments, ruled-out letters, rejected words and Finnish morphology.</p>
+</section>
+
+<section aria-labelledby="fallbacks">
+  <span class="eyebrow">3 · The other two strategies</span>
+  <h2 id="fallbacks">When the word list is not enough</h2>
+  <div class="two">
+    <div class="sheet" style="display:grid;gap:12px">
+      <h3>Missing-word branch and bound</h3>
+      <p>Printed puzzles contain names and brands no list covers. Here every slot has an extra option, “no listed word”, which costs one. Search keeps a cap on that cost and widens or tightens it in phases.</p>
+      <svg class="chart" id="capchart" viewBox="0 0 420 190" role="img" aria-label="Schematic of the unsupported-word cap over successive search phases"></svg>
+      <ul>
+        <li>Starts with a cap of one unsupported word. With no hypothesis after a node slice, the cap grows to max(cap + 1, ⌊1.5 × cap⌋).</li>
+        <li>Each improvement restarts from the root with a cap one below the best cost found.</li>
+        <li>With no hypothesis by the last quarter of the budget, an uncapped dive guarantees some answer.</li>
+        <li>Words are tried least-constraining first: letters that many crossing candidates share.</li>
+      </ul>
+    </div>
+    <div class="sheet" style="display:grid;gap:12px">
+      <h3>Dictionary-free annealing</h3>
+      <p>Without a word list, the solver optimises the number-to-letter mapping itself. A move gives one number a new letter; under unique letters the number that held it swaps. Only slots touching the changed numbers are rescored.</p>
+      <svg class="chart" id="annealchart" viewBox="0 0 420 190" role="img" aria-label="Temperature and acceptance probability over one 1200-step annealing run"></svg>
+      <ul>
+        <li>Temperature falls linearly from 5.3 to 0.3 over each 1,200-step run; a worse move is accepted with probability e<sup>Δ/T</sup>.</li>
+        <li>Each hard-rule violation (forbidden pattern, ruled-out letter, rejected word) costs 1,000 points, so they are repaired, never returned.</li>
+        <li>Runs restart with a shuffled alphabet and a fixed seed, keeping the 12 best distinct mappings.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="budget">
+  <span class="eyebrow">4 · Limits</span>
+  <h2 id="budget">Search budgets</h2>
+  <p>The clock starts after preparation (loading, model adaptation, indexing). Any limit that cuts the search marks the result as non-exhaustive.</p>
+  <div class="sheet budgets">
+    <table>
+      <thead><tr><th>Mode</th><th style="text-align:right">Time</th><th style="text-align:right">Search nodes</th></tr></thead>
+      <tbody>
+        <tr><td>Quick</td><td class="num">4 s</td><td class="num">30,000</td></tr>
+        <tr><td>Deep</td><td class="num">60 s</td><td class="num">1,000,000</td></tr>
+        <tr><td>Extended</td><td class="num">300 s</td><td class="num">5,000,000</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Fixed in every mode: 500 ranked candidates per slot in strict search, 20,000 kept for missing-word search, 20,000 fragments per open slot, 12 alternatives, and a queue of about 200,000 cells of pending states (for example 2,469 states on a 9 × 9 grid). A search that finds nothing is not proof the puzzle is impossible.</p>
+</section>
+</main>
+
+<script id="engine">
+// Compact port of _domain_propagation and _constraint_search for standard rules.
+function slotsOf(p){const S=[];for(const dir of ['Across','Down']){const lines=[];
+  if(dir==='Across')for(let r=0;r<p.rows;r++)lines.push([...Array(p.cols)].map((_,c)=>r*p.cols+c));
+  else for(let c=0;c<p.cols;c++)lines.push([...Array(p.rows)].map((_,r)=>r*p.cols+c));
+  for(const line of lines){let seg=[];for(const i of [...line,null]){if(i!==null&&!p.cells[i].black){seg.push(i);continue}if(seg.length>=2)S.push({cells:seg,dir});seg=[]}}}
+  return S}
+function shape(items){const m=new Map();return items.map(x=>{if(!m.has(x))m.set(x,m.size);return m.get(x)}).join(',')}
+function solve(p,words,score){
+  const cells=p.cells,slots=slotsOf(p),trace=[];let rounds=0;
+  const num=i=>cells[i].number;
+  const label=j=>`${slots[j].dir} r${Math.floor(slots[j].cells[0]/p.cols)+1}c${slots[j].cells[0]%p.cols+1}`;
+  const forced=L=>{const k={};cells.forEach((c,i)=>{if(!c.black&&L[i])k[c.number]=L[i]});return cells.map((c,i)=>c.black?'':(k[c.number]||L[i]))};
+  const okMap=L=>{const g={},o={};for(let i=0;i<cells.length;i++){const l=L[i];if(!l||cells[i].black)continue;const n=num(i);if(g[n]&&g[n]!==l)return false;if(o[l]&&o[l]!==n)return false;g[n]=l;o[l]=n}return true};
+  const compat=(s,w,L)=>{const T=L.slice();for(let q=0;q<w.length;q++){const i=s.cells[q];if(T[i]&&T[i]!==w[q])return false;T[i]=w[q]}return okMap(forced(T))};
+  const base=forced(cells.map(c=>c.black?'':(c.letter||'')));
+  const rank=(a,b)=>(score[b]??0)-(score[a]??0)||(a<b?-1:1);
+  const info=slots.map(s=>{const want=shape(s.cells.map(num));const len=words.filter(w=>w.length===s.cells.length);const pat=len.filter(w=>shape([...w])===want);
+    return {byLen:len.length,byPat:pat.length,kept:pat.filter(w=>compat(s,w,base)).sort(rank)}});
+  trace.push({type:'candidates',letters:base.slice(),domains:info.map(d=>d.kept),info,removed:slots.map(()=>[])});
+  function propagate(L,D,depth){D=D.map(d=>d&&d.slice());
+    for(let round=1;;round++){rounds++;L=forced(L);
+      const removed=D.map(()=>[]);const sup={};
+      const fail=(why,slot)=>({fail:why,slot,D,removed,L});
+      if(!okMap(L))return fail('two numbers would share a letter');
+      for(let j=0;j<slots.length;j++){if(!D[j])continue;const k=[];for(const w of D[j])(compat(slots[j],w,L)?k:removed[j]).push(w);D[j]=k;
+        if(!k.length)return fail(`no candidate is left for ${label(j)}`,j);
+        slots[j].cells.forEach((i,q)=>{const v=new Set(k.map(w=>w[q]));const n=num(i);sup[n]=sup[n]?new Set([...sup[n]].filter(x=>v.has(x))):v});
+        for(const n in sup)if(!sup[n].size)return fail(`number ${n} has no letter left`,j)}
+      const own={};cells.forEach((c,i)=>{if(!c.black&&L[i])own[L[i]]=c.number});
+      for(const n in sup)if(sup[n].size===1){const l=[...sup[n]][0];if(own[l]&&own[l]!=n)return fail(`letter ${l} would belong to two numbers`);own[l]=+n}
+      for(const n in sup){sup[n]=new Set([...sup[n]].filter(v=>!own[v]||own[v]==n));if(!sup[n].size)return fail(`number ${n} has no letter left`)}
+      const newly=[];
+      cells.forEach((c,i)=>{if(c.black)return;const v=sup[c.number];if(v&&!L[i]&&v.size===1){L[i]=[...v][0];newly.push(i)}});
+      let changed=newly.length>0||removed.some(r=>r.length);
+      for(let j=0;j<slots.length;j++){if(!D[j])continue;const k=D[j].filter(w=>slots[j].cells.every((i,q)=>!sup[num(i)]||sup[num(i)].has(w[q])));
+        if(k.length!==D[j].length){changed=true;removed[j].push(...D[j].filter(w=>!k.includes(w)))}D[j]=k;if(!k.length)return fail(`no candidate is left for ${label(j)}`,j)}
+      const support={};for(const n in sup)support[n]=[...sup[n]].sort().join('');
+      trace.push({type:'propagate',depth,round,letters:L.slice(),domains:D.map(d=>d&&d.slice()),removed,newly,support,changed});
+      if(!changed)return {L,D}}}
+  const stack=[{L:base.slice(),D:info.map(d=>d.kept),depth:0,id:0,parent:null}];const sols=[];let nodes=0,nextId=1;
+  while(stack.length){const st=stack.pop();nodes++;
+    if(st.via)trace.push({type:'branch',depth:st.depth,node:st.id,slot:st.via.slot,word:st.via.word,letters:st.L.slice(),domains:st.D,removed:slots.map(()=>[])});
+    const r=propagate(st.L,st.D,st.depth);
+    if(r.fail){trace.push({type:'dead',depth:st.depth,node:st.id,reason:r.fail,slot:r.slot,letters:r.L.slice(),domains:r.D,removed:r.removed});continue}
+    let {L,D}=r;const filled=D.map((d,j)=>!!d&&slots[j].cells.every(i=>L[i]));D=D.map((d,j)=>filled[j]?null:d);
+    const open=D.map((d,j)=>d?j:-1).filter(j=>j>=0);
+    if(open.length){const best=open.sort((a,b)=>D[a].length-D[b].length||slots[b].cells.length-slots[a].cells.length||a-b)[0];
+      const rest=D.map((d,j)=>j===best?null:d);
+      const kids=D[best].map(w=>{const T=L.slice();slots[best].cells.forEach((i,q)=>T[i]=w[q]);return {L:T,D:rest,depth:st.depth+1,id:nextId++,parent:st.id,via:{slot:best,word:w}}});
+      trace.push({type:'choose',depth:st.depth,node:st.id,slot:best,options:D[best].slice(),letters:L.slice(),domains:D,removed:slots.map(()=>[]),kids:kids.map(k=>({id:k.id,word:k.via.word}))});
+      stack.push(...kids.slice().reverse());continue}
+    sols.push(L);trace.push({type:'solution',depth:st.depth,node:st.id,letters:L.slice(),index:sols.length,domains:D,removed:slots.map(()=>[])})}
+  trace.push({type:'done',nodes,rounds,solutions:sols.length,letters:sols[0]||base,domains:info.map(()=>null),removed:slots.map(()=>[])});
+  return {slots,trace,sols,nodes,rounds}}
+if(typeof module!=='undefined')module.exports={solve,slotsOf};
+</script>
+
+<script>
+(function(){
+if(typeof document==='undefined')return;
+const WORDS='A I AN AS AT BE BY DO GO HE IF IN IS IT ME MY NO OF ON OR SO TO UP US WE CAT DOG DAD DID MOM SUN SEA SKY CAR BUS MAP PEN RED ART EAT TEA ATE RAT TAR EAR ARE ERA TEN NET ONE TWO BAT BAR TAB BOAT BOOK CODE WORD HOME HOUSE WATER CROSS PUZZLE LETTER NUMBER HELLO WORLD TEST TREE ROAD STAR MOON LIGHT NIGHT DAY PLAY READ WRITE'.split(' ');
+// Letter-model scores from solver._score with the model adapted to this list.
+const SCORE={ARE:5.38,ART:5.29,ATE:5.79,BAR:6.55,BAT:4.09,BUS:5.14,CAR:5.24,CAT:3.71,DAD:3.84,DAY:5.44,DID:4.46,DOG:4.13,EAR:4.89,EAT:1.45,ERA:2.27,MAP:0.12,MOM:-3.25,NET:4.29,ONE:4.95,PEN:5.89,RAT:2.72,RED:8.42,SEA:3.72,SKY:5.39,SUN:4.29,TAB:0.51,TAR:5.03,TEA:4.16,TEN:6.12,TWO:-1.5};
+const ANSWER='SEAEARART',NUMS=[1,2,3,2,3,4,3,4,5];
+let given=new Set([3]);  // number 3 = A confirmed
+let run,step=0,timer=null;
+const $=id=>document.getElementById(id);
+function puzzle(){return {rows:3,cols:3,cells:NUMS.map((n,i)=>({number:n,letter:given.has(n)&&[...ANSWER].findIndex((_,k)=>NUMS[k]===n)===i?ANSWER[i]:''}))}}
+function rerun(){stop();run=solve(puzzle(),WORDS,SCORE);step=0;$('scrub').max=run.trace.length-1;render()}
+const lbl=(s)=>`${s.dir} r${Math.floor(s.cells[0]/3)+1}c${s.cells[0]%3+1}`;
+function cellsText(list){return list.map(i=>`r${Math.floor(i/3)+1}c${i%3+1}`).join(', ')}
+function narrate(t){
+  const s=t.slot!=null?run.slots[t.slot]:null;
+  switch(t.type){
+    case 'candidates':{const i=t.info[0];return ['Candidates',`The index holds ${i.byLen} three-letter words. Every slot here has three different numbers, so the repeated-letter pattern drops words like DAD and MOM, leaving ${i.byPat}. Words that clash with confirmed letters or claim a confirmed letter for another number go next. Each slot's list is ranked by letter-model score.`]}
+    case 'propagate':{const gone=t.removed.reduce((a,r)=>a+r.length,0);
+      const forcedTxt=t.newly.length?` Forced: ${t.newly.map(i=>`${t.letters[i]} at r${Math.floor(i/3)+1}c${i%3+1}`).join(', ')}.`:'';
+      return ['Propagation',`Depth ${t.depth}, round ${t.round}. ${gone?`${gone} candidate${gone>1?'s':''} no longer fit the crossings or number mappings and were removed.`:'Nothing changed, so propagation reached a fixed point.'} Each number keeps only letters that every slot containing it can still supply.${forcedTxt}`]}
+    case 'choose':return ['Branch point',`No letter is forced yet. The solver branches on the slot with the fewest candidates (ties go to the longer, then earlier slot): ${lbl(s)}, with ${t.options.length} options tried in score order: ${t.options.join(', ')}.`];
+    case 'branch':return ['Try a word',`Place ${t.word} in ${lbl(s)} as a hypothesis, then propagate its consequences.`];
+    case 'dead':return ['Contradiction',`Propagation failed: ${t.reason}. This branch is abandoned and the search backtracks to the next queued option.`];
+    case 'solution':return ['Solution',`Every slot holds a listed word and every number has one letter. Recorded as alternative ${t.index}; the search continues until the queue is empty or 12 alternatives are found.`];
+    case 'done':return ['Search finished',`The queue is empty after ${t.nodes} search nodes and ${t.rounds} propagation rounds, with ${t.solutions} solution${t.solutions===1?'':'s'}. Nothing was truncated, so for this word list the search is exhaustive.`];
+  }}
+function render(){
+  const t=run.trace[step];const prev=run.trace[step-1];
+  // grid
+  const g=$('grid');g.textContent='';
+  const hot=new Set(t.slot!=null&&t.type!=='done'?run.slots[t.slot].cells:[]);
+  const fresh=new Set(t.newly||[]);
+  NUMS.forEach((n,i)=>{const b=document.createElement('button');b.className='cell';b.type='button';
+    const isGiven=given.has(n);if(isGiven)b.classList.add('given');if(hot.has(i))b.classList.add('hot');if(fresh.has(i))b.classList.add('new');
+    b.innerHTML=`<span class="n">${n}</span>${t.letters[i]||''}`;
+    b.setAttribute('aria-label',`Row ${Math.floor(i/3)+1} column ${i%3+1}, number ${n}, ${t.letters[i]||'empty'}${isGiven?', confirmed':''}. Toggle confirmation.`);
+    b.onclick=()=>{given.has(n)?given.delete(n):given.add(n);rerun()};g.appendChild(b)});
+  // support
+  const nums=[1,2,3,4,5];$('supH').innerHTML='<th>No.</th>'+nums.map(n=>`<th>${n}</th>`).join('');
+  $('supB').innerHTML='<th>Can be</th>'+nums.map(n=>{const fixed=NUMS.findIndex((m,i)=>m===n&&t.letters[i]);
+    const v=fixed>=0?t.letters[fixed]:(t.support&&t.support[n])||'?';return `<td class="${v.length===1&&v!=='?'?'one':''}">${v}</td>`}).join('');
+  // slots
+  const box=$('slots');box.textContent='';
+  run.slots.forEach((s,j)=>{const d=document.createElement('div');d.className='slot';
+    if(hot.has(s.cells[0])&&t.slot===j)d.classList.add('hot');if(t.type==='dead'&&t.slot===j)d.classList.add('fail');
+    const dom=t.domains[j];const rem=(t.removed&&t.removed[j])||[];
+    const word=s.cells.map(i=>t.letters[i]||'·').join('');
+    let body;
+    if(!dom){body=t.type==='candidates'?'':`<span class="done">${s.cells.every(i=>t.letters[i])?`filled: ${word}`:'assigned'}</span>`}
+    else body=`<div class="words">${dom.map(w=>`<span class="w${t.type==='branch'&&t.slot===j&&w===t.word?' try':''}">${w}</span>`).join('')}${rem.map(w=>`<span class="w gone">${w}</span>`).join('')}</div>`;
+    if(t.type==='branch'&&t.slot===j)body=`<div class="words"><span class="w try">${t.word}</span></div>`;
+    d.innerHTML=`<h4>${lbl(s)}<span>${dom?dom.length+' left':''}</span></h4>${body}`;box.appendChild(d)});
+  // narration
+  const [tag,text]=narrate(t);const n=$('narr');n.className='narr '+t.type;n.innerHTML=`<span class="tag">${tag}</span><p>${text}</p>`;
+  $('count').textContent=`step ${step+1} / ${run.trace.length}`;$('scrub').value=step;
+  $('prev').disabled=$('first').disabled=step===0;$('next').disabled=step===run.trace.length-1;
+  // stats so far
+  const seen=run.trace.slice(0,step+1);
+  $('stats').innerHTML=`<span>Nodes <b>${seen.filter(x=>x.type==='branch').length+1}</b></span><span>Propagation rounds <b>${seen.filter(x=>x.type==='propagate').length+seen.filter(x=>x.type==='dead').length}</b></span><span>Dead ends <b>${seen.filter(x=>x.type==='dead').length}</b></span><span>Solutions <b>${seen.filter(x=>x.type==='solution').length}</b></span>`;
+  drawTree(seen);
+}
+function drawTree(seen){
+  // Build tree from all choose events; colour nodes by what has been revealed so far.
+  const nodes={0:{id:0,label:'start',kids:[],depth:0}};
+  for(const t of run.trace)if(t.type==='choose')for(const k of t.kids)nodes[k.id]={id:k.id,label:k.word,kids:[],depth:t.depth+1,parent:t.node},nodes[t.node].kids.push(k.id);
+  const state={};for(const t of seen){if(t.node==null)continue;
+    if(t.type==='branch')state[t.node]='try';if(t.type==='dead')state[t.node]='dead';if(t.type==='solution')state[t.node]='ok';if(t.type==='choose'||t.type==='propagate')state[t.node]=state[t.node]||'open'}
+  state[0]=state[0]||'open';
+  const cur=seen[seen.length-1].node;
+  let leaf=0;const pos={};
+  (function place(id){const nd=nodes[id];if(!nd.kids.length){pos[id]=leaf++;return}nd.kids.forEach(place);pos[id]=(pos[nd.kids[0]]+pos[nd.kids[nd.kids.length-1]])/2})(0);
+  const maxD=Math.max(...Object.values(nodes).map(n=>n.depth));const dx=78,dy=58,W=Math.max(320,leaf*dx+20),H=(maxD+1)*dy+16;
+  const X=id=>10+dx/2+pos[id]*dx,Y=id=>22+nodes[id].depth*dy;
+  const col={try:'var(--focus)',dead:'var(--dead)',ok:'var(--ok)',open:'var(--teal)'};
+  let svg=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Search tree">`;
+  for(const n of Object.values(nodes))if(n.parent!=null)svg+=`<line x1="${X(n.parent)}" y1="${Y(n.parent)+11}" x2="${X(n.id)}" y2="${Y(n.id)-11}" stroke="var(--rule)" stroke-width="1.5"/>`;
+  for(const n of Object.values(nodes)){const s=state[n.id];const c=s?col[s]:'var(--rule)';const fill=s&&s!=='open'?c:'var(--sheet)';
+    svg+=`<g><rect x="${X(n.id)-32}" y="${Y(n.id)-11}" width="64" height="22" rx="11" fill="${fill}" stroke="${c}" stroke-width="${n.id===cur?3:1.5}"/>`+
+      `<text x="${X(n.id)}" y="${Y(n.id)+4}" text-anchor="middle" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12" font-weight="600" fill="${s&&s!=='open'?'var(--sheet)':(s?'var(--ink)':'var(--muted)')}">${n.label}</text></g>`}
+  $('tree').innerHTML=svg+'</svg>';
+}
+function stop(){if(timer){clearInterval(timer);timer=null}$('play').textContent='Play'}
+$('next').onclick=()=>{stop();if(step<run.trace.length-1){step++;render()}};
+$('prev').onclick=()=>{stop();if(step>0){step--;render()}};
+$('first').onclick=()=>{stop();step=0;render()};
+$('scrub').oninput=e=>{stop();step=+e.target.value;render()};
+$('play').onclick=()=>{if(timer)return stop();if(step>=run.trace.length-1)step=0;$('play').textContent='Pause';
+  timer=setInterval(()=>{if(step>=run.trace.length-1)return stop();step++;render()},1400);render()};
+document.addEventListener('keydown',e=>{if(e.target.closest&&e.target.closest('input'))return;if(e.key==='ArrowRight')$('next').click();if(e.key==='ArrowLeft')$('prev').click()});
+rerun();
+
+// Charts, drawn to scale from the solver constants.
+function annealChart(){const W=420,H=190,L=40,R=36,T=14,B=34,w=W-L-R,h=H-T-B;
+  const x=s=>L+s/1200*w,yT=v=>T+h-(v/6)*h,yP=v=>T+h-v*h;
+  let s='';for(let v=0;v<=6;v+=2)s+=`<line x1="${L}" x2="${L+w}" y1="${yT(v)}" y2="${yT(v)}" stroke="var(--rule)"/><text x="${L-6}" y="${yT(v)+4}" text-anchor="end">${v}</text>`;
+  for(const p of [0,.5,1])s+=`<text x="${L+w+6}" y="${yP(p)+4}">${p}</text>`;
+  for(const st of [0,300,600,900,1200])s+=`<text x="${x(st)}" y="${H-16}" text-anchor="middle">${st}</text>`;
+  s+=`<text x="${L+w/2}" y="${H-2}" text-anchor="middle">step within a run</text>`;
+  const path=f=>Array.from({length:61},(_,k)=>{const st=k*20;return `${k?'L':'M'}${x(st).toFixed(1)},${f(st).toFixed(1)}`}).join('');
+  const temp=st=>0.3+5*(1-st/1200);
+  s+=`<path d="${path(st=>yT(temp(st)))}" fill="none" stroke="var(--ink)" stroke-width="2"/>`;
+  s+=`<path d="${path(st=>yP(Math.exp(-1/temp(st))))}" fill="none" stroke="var(--teal)" stroke-width="2"/>`;
+  s+=`<path d="${path(st=>yP(Math.exp(-4/temp(st))))}" fill="none" stroke="var(--focus)" stroke-width="2" stroke-dasharray="5 4"/>`;
+  s+=`<text x="${L+8}" y="${yT(temp(0))-6}" style="fill:var(--ink)">temperature T (left axis)</text>`;
+  s+=`<text x="${x(470)}" y="${yP(Math.exp(-1/temp(470)))-8}" style="fill:var(--teal)">accept Δ = −1</text>`;
+  s+=`<text x="${x(560)}" y="${yP(Math.exp(-4/temp(560)))+18}" style="fill:var(--focus)">accept Δ = −4</text>`;
+  $('annealchart').innerHTML=s}
+function capChart(){const W=420,H=190,L=40,R=14,T=14,B=34,w=W-L-R,h=H-T-B;
+  // Schematic: caps 1 → 2 → 3 with no hypothesis, then a hypothesis of cost 3 found, restart at cap 2, improve to 2, restart at cap 1, no improvement.
+  const phases=[{c:1,n:1,f:null},{c:2,n:1,f:null},{c:3,n:1.3,f:3},{c:2,n:1.5,f:2},{c:1,n:2.2,f:null}];
+  const total=phases.reduce((a,p)=>a+p.n,0);const x=v=>L+v/total*w,y=v=>T+h-v/4*h;
+  let s='';for(let v=0;v<=4;v++)s+=`<line x1="${L}" x2="${L+w}" y1="${y(v)}" y2="${y(v)}" stroke="var(--rule)"/><text x="${L-6}" y="${y(v)+4}" text-anchor="end">${v}</text>`;
+  let at=0;phases.forEach((p,k)=>{s+=`<rect x="${x(at)+1}" y="${y(p.c)}" width="${x(at+p.n)-x(at)-2}" height="${y(0)-y(p.c)}" fill="var(--teal-soft)" stroke="var(--teal)"/>`;
+    if(p.f!=null)s+=`<circle cx="${x(at+p.n*.8)}" cy="${y(p.f)}" r="5" fill="var(--focus)"/>`;
+    s+=`<text x="${(x(at)+x(at+p.n))/2}" y="${H-16}" text-anchor="middle">${k===0?'start':p.f!=null?'found '+p.f:k===4?'no gain':'widen'}</text>`;at+=p.n});
+  s+=`<text x="${L+w/2}" y="${H-2}" text-anchor="middle">phases (schematic) · bars: cap · dots: best hypothesis</text>`;
+  s+=`<text x="${L+4}" y="${T+10}">unsupported words</text>`;
+  $('capchart').innerHTML=s}
+annealChart();capChart();
+})();
+</script>
