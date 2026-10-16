@@ -13,7 +13,7 @@ function numberEntry(previous, cell, key, now){
  if(key==='Backspace')return continuing?{cell,at:now,digits:digits.slice(0,-1)}:null;
  if(!/^[0-9]$/.test(key))return null;
  const next=digits+key;
- if(!/^[1-9][0-9]{0,2}$/.test(next))return continuing?previous:null;
+ if(!/^[1-9][0-9]?$/.test(next))return continuing?previous:null;
  return {cell,at:now,digits:next};
 }
 function imageBoundsFromPercent(values){

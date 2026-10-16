@@ -16,12 +16,12 @@ def check(puzzle, language):
     """Validate and normalize both fields in place; raise ValueError."""
     alphabet = set(ALPHABETS[language])
     eliminations = puzzle.get('eliminations', {})
-    if not isinstance(eliminations, dict) or len(eliminations) > 999:
+    if not isinstance(eliminations, dict) or len(eliminations) > 99:
         raise ValueError('Ruled-out letters must map numbers to letter lists.')
     normalized = {}
     for number, letters in eliminations.items():
-        if not isinstance(number, str) or not number.isascii() or not number.isdecimal() or not 1 <= int(number) <= 999:
-            raise ValueError('Ruled-out letters belong to numbers from 1 to 999.')
+        if not isinstance(number, str) or not number.isascii() or not number.isdecimal() or not 1 <= int(number) <= 99:
+            raise ValueError('Ruled-out letters belong to numbers from 1 to 99.')
         if not isinstance(letters, list) or len(letters) > len(alphabet) or any(not isinstance(l, str) for l in letters):
             raise ValueError('Ruled-out letters must be a list of letters.')
         letters = {normalize(l.strip()) for l in letters}

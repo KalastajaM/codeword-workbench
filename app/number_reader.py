@@ -9,6 +9,9 @@ every number 1..N, which gives a final consistency check.
 """
 
 GLYPH_W, GLYPH_H = 16, 24
+# No alphabet has more than 99 letters, so a codeword never numbers past 99.
+# A third glyph is still read: it is usually a stray stroke to repair.
+MAX_NUMBER = 99
 
 
 def _binary(gray):
@@ -449,11 +452,12 @@ def review_numbers(cells, confidence, sure=.6):
         number = cell['number']
         doubtful = confidence.get(i, 0) < sure
         # A rarely used letter can number just above the repeated run.
-        if number and top and int(number) > top + 3:
+        if number and (int(number) > MAX_NUMBER or top and int(number) > top + 3):
             # A stray stroke adds a digit at either end; keep the reading only
             # if dropping it gives a number used elsewhere in the puzzle.
             options = [text for text in (number[1:], number[:-1])
-                       if text and text[0] != '0' and 1 <= int(text) <= top + 3 and counts.get(int(text))]
+                       if text and text[0] != '0' and 1 <= int(text) <= min(top + 3 if top else MAX_NUMBER, MAX_NUMBER)
+                       and counts.get(int(text))]
             number = max(options, key=lambda text: counts[int(text)]) if options else ''
             cell['number'], doubtful = number, True
         if not number:

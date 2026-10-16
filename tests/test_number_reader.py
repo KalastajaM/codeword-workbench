@@ -163,6 +163,11 @@ class NumberReviewTests(unittest.TestCase):
         self.assertEqual((checked, missing), (2, 2))
         self.assertNotIn('numberReview', cells[0])
 
+    def test_numbers_above_99_are_repaired_without_a_repeated_run(self):
+        cells = self.cells(['14', '14', '114', '500'])
+        review_numbers(cells, {i: 1 for i in range(len(cells))})
+        self.assertEqual([c['number'] for c in cells], ['14', '14', '14', ''])
+
     def test_weak_or_unique_readings_are_marked_for_checking(self):
         cells = self.cells(['1', '1', '2', '2', '2', '4'])
         review_numbers(cells, {0: 1, 1: 1, 2: .4, 3: 1, 4: 1, 5: 1})

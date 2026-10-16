@@ -27,9 +27,8 @@ test('New cells have no open boundaries and numeric entry replaces, appends and 
  let entry=numberEntry(null,4,'2',1000);
  assert.equal(entry.digits,'2');
  entry=numberEntry(entry,4,'9',1200);assert.equal(entry.digits,'29');
- entry=numberEntry(entry,4,'0',1250);assert.equal(entry.digits,'290');
- assert.equal(numberEntry(entry,4,'1',1300).digits,'290','Numbers cannot exceed three digits');
- entry=numberEntry(entry,4,'Backspace',1400);assert.equal(entry.digits,'29');
+ assert.equal(numberEntry(entry,4,'0',1250).digits,'29','Numbers cannot exceed two digits');
+ entry=numberEntry(entry,4,'Backspace',1400);assert.equal(entry.digits,'2');
  assert.equal(numberEntry(entry,5,'1',1450).digits,'1','Changing cell starts a new number');
  assert.equal(numberEntry(entry,4,'1',2500).digits,'1','Pause starts replacement');
  assert.equal(numberEntry(entry,4,'Backspace',2500),null,'Backspace outside numeric entry clears a letter instead');

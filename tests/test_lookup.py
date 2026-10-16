@@ -13,7 +13,7 @@ class LookupTests(unittest.TestCase):
                          [('letter', 'A'), ('number', '12'), ('number', '12'), ('letter', 'K'), ('number', '5')])
         self.assertEqual(parse_pattern('en', 'a12?k'), [('letter', 'A'), ('number', '12'), ('any', None), ('letter', 'K')])
         self.assertEqual(parse_pattern('sv', 'b å t'), [('letter', 'B'), ('letter', 'Å'), ('letter', 'T')])
-        for bad in ('', 'A Å', 'A 0', 'A 1000', 'A-B'):
+        for bad in ('', 'A Å', 'A 0', 'A 100', 'A-B'):
             with self.assertRaises(ValueError):
                 parse_pattern('en', bad)
 

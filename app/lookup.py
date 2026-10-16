@@ -29,8 +29,8 @@ def parse_pattern(language, text):
     for match in _TOKEN.finditer(normalize(text)):
         number, wildcard, letter = match.groups()
         if number is not None:
-            if not 1 <= int(number) <= 999:
-                raise ValueError('Pattern numbers must be from 1 to 999.')
+            if not 1 <= int(number) <= 99:
+                raise ValueError('Pattern numbers must be from 1 to 99.')
             tokens.append(('number', str(int(number))))
         elif wildcard is not None:
             tokens.append(('any', None))
@@ -72,7 +72,7 @@ def pattern_search(puzzle, text, words, morphology=None, use_mappings=True):
                 known[str(int(cell['number']))] = normalize(cell['letter'])
     owner = {letter: number for number, letter in known.items()}
     used = {value for kind, value in tokens if kind == 'number'} | set(known)
-    spare = (str(n) for n in range(999, 0, -1) if str(n) not in used)
+    spare = (str(n) for n in range(99, 0, -1) if str(n) not in used)
     # Typed letters belong to some number. Give each a stand-in number so
     # unique-letter rules keep other numbers from taking it.
     letter_numbers = {}

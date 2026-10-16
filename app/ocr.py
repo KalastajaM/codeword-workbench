@@ -219,6 +219,7 @@ def _read_numbers_by_consensus(cells, crops, position, diagnostics):
     for i in disturbed:
         confidence[i] = 0
     changed = 0
+    # Three-digit readings are kept for review_numbers to repair or drop.
     for index, number in numbers.items():
         if 0 < int(number) <= 999 and cells[index]['number'] != number:
             cells[index]['number'] = number
