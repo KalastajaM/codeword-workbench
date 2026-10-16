@@ -14,6 +14,8 @@ BLACK = {(0, 3), (2, 7), (5, 0), (6, 14), (9, 9), (11, 4), (22, 19), (17, 12)}
 # Pale tints as a camera sees a printed coloured block, plus one numbered tint.
 TINTED = {(1, 1), (3, 10), (8, 5), (13, 16), (19, 2), (20, 8)}
 NUMBERED_TINT = (14, 6)
+# Lifts the middle of the page by about half a cell.
+WAVE = 24
 
 
 def data_url(image):
@@ -22,13 +24,15 @@ def data_url(image):
     return 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode()
 
 
-def photographed(x, y, hook=0):
+def photographed(x, y, hook=0, wave=0):
     """Map flat grid coordinates to a tilted, bent photograph of the page.
 
     `hook` curls the top border down near the spine, a shape a single
-    midpoint per edge cannot follow.
+    midpoint per edge cannot follow. `wave` lifts the middle of the page
+    while its borders stay put, which no edge handle can describe.
     """
     width, height = COLS * PITCH, ROWS * PITCH
+    y -= wave * math.sin(math.pi * x / width) ** 2 * math.sin(math.pi * y / height)
     y += hook * (max(0, x / width - .6) / .4) ** 2 * (1 - y / height) ** 2
     # A curled page compresses some columns more than others; no single
     # perspective map can make these widths equal again.
@@ -41,9 +45,9 @@ def photographed(x, y, hook=0):
     return (120 + (x + .06 * y) / denominator * 1.05, 90 + (y + .03 * x) / denominator)
 
 
-def photo_fixture(hook=0):
+def photo_fixture(hook=0, wave=0):
     def place(x, y):
-        return photographed(x, y, hook)
+        return photographed(x, y, hook, wave)
     image = Image.new('RGB', (1300, 1000), (205, 200, 190))
     draw = ImageDraw.Draw(image)
     width, height = COLS * PITCH, ROWS * PITCH
@@ -119,6 +123,15 @@ class StraightenTests(unittest.TestCase):
         flat = Image.open(io.BytesIO(base64.b64decode(result['image'].split(',', 1)[1])))
         self.assertAlmostEqual(result['bounds']['x'] * flat.width, (1 - result['bounds']['width']) * flat.width / 2, delta=2)
 
+    def test_a_wave_inside_the_page_is_followed_cell_by_cell(self):
+        photo, handles = photo_fixture(wave=WAVE)
+        result = straighten({'image': data_url(photo), 'handles': handles})
+        self.assertEqual((result['rows'], result['cols']), (ROWS, COLS))
+        with patch('app.ocr.available', return_value=False):
+            recognized = recognize({'image': result['image'], 'rows': ROWS, 'cols': COLS,
+                                    'bounds': result['bounds'], 'photo': True})
+        self.assertEqual({divmod(i, COLS) for i, cell in enumerate(recognized['cells']) if cell['black']}, BLACK | TINTED)
+
     def test_photo_mode_never_reads_letters(self):
         photo, handles = photo_fixture()
         result = straighten({'image': data_url(photo), 'handles': handles})
@@ -187,6 +200,16 @@ class StraightenTests(unittest.TestCase):
         photo, handles = photo_fixture()
         handles.update(top=[], right=[], bottom=[], left=[])
         self.assertEqual(straighten({'image': data_url(photo), 'handles': handles})['image'][:22], 'data:image/jpeg;base64')
+
+    def test_a_corner_cut_off_by_the_photo_may_sit_just_outside_it(self):
+        photo, handles = photo_fixture()
+        cropped = photo.crop((0, 0, 1040, 1000))
+        scale = photo.width / cropped.width
+        moved = {name: ([{'x': p['x'] * scale, 'y': p['y']} for p in value] if isinstance(value, list)
+                        else {'x': value['x'] * scale, 'y': value['y']}) for name, value in handles.items()}
+        self.assertGreater(moved['topRight']['x'], 1)
+        result = straighten({'image': data_url(cropped), 'handles': moved})
+        self.assertEqual((result['rows'], result['cols']), (ROWS, COLS))
 
     def test_invalid_handles_are_rejected(self):
         photo, handles = photo_fixture()

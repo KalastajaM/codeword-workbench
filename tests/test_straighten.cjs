@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {CORNERS, EDGE_NAMES, MAX_EDGE_POINTS, defaultHandles, moveCorner, moveEdgePoint, removeEdgePoint, addEdgePoint, surface, edgePaths, outlinePath} = require('../static/straighten.js');
+const {OUTSIDE, CORNERS, EDGE_NAMES, MAX_EDGE_POINTS, defaultHandles, moveCorner, moveEdgePoint, removeEdgePoint, addEdgePoint, surface, edgePaths, outlinePath} = require('../static/straighten.js');
 
 const near = (a, b, tolerance = 1e-9) => assert.ok(Math.abs(a - b) < tolerance, `${a} is not near ${b}`);
 
@@ -12,13 +12,15 @@ test('default handles inset the image with one point on each straight edge', () 
  assert.deepEqual(handles.right, [{x: .92, y: .5}]);
 });
 
-test('moving a corner carries edge points by their nearness and stays inside the image', () => {
+test('moving a corner carries edge points by their nearness and stays near the image', () => {
  const handles = {...defaultHandles(), top: [{x: .29, y: .08}, {x: .5, y: .08}]};
- const moved = moveCorner(handles, 'topLeft', .02, -.5);
+ const moved = moveCorner(handles, 'topLeft', .02, 0);
  assert.deepEqual(moved.topLeft, {x: .02, y: 0});
  // A quarter of the way along the top edge moves three quarters as far as the corner.
  near(moved.top[0].y, .08 - .08 * .75);
  near(moved.top[1].y, .04);
+ // A corner cut off by the photo may sit just outside it, but no further.
+ assert.deepEqual(moveCorner(handles, 'bottomRight', 1.5, .9).bottomRight, {x: 1 + OUTSIDE, y: .9});
  near(moved.left[0].x, .05);
  assert.deepEqual(moved.right, handles.right);
  const bent = moveEdgePoint(handles, 'top', 1, .5, .15);

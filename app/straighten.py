@@ -11,6 +11,8 @@ CORNER_NAMES = ('topLeft', 'topRight', 'bottomRight', 'bottomLeft')
 EDGES = {'top': ('topLeft', 'topRight'), 'right': ('topRight', 'bottomRight'),
          'bottom': ('bottomLeft', 'bottomRight'), 'left': ('topLeft', 'bottomLeft')}
 MAX_EDGE_POINTS = 8
+# A photo often cuts off a corner of the grid; its handle may sit just outside.
+OUTSIDE = .06
 MAX_SIDE = 2000
 MESH_TILES = 40
 # Keep some of the photo around the outline so its border strokes stay whole.
@@ -23,8 +25,8 @@ def _point(value, width, height):
         x, y = float(value['x']), float(value['y'])
     except (KeyError, TypeError, ValueError):
         raise ValueError('Each straightening handle needs x and y fractions.') from None
-    if not (math.isfinite(x) and math.isfinite(y)) or not (0 <= x <= 1 and 0 <= y <= 1):
-        raise ValueError('Straightening handles must lie inside the image.')
+    if not (math.isfinite(x) and math.isfinite(y)) or not (-OUTSIDE <= x <= 1 + OUTSIDE and -OUTSIDE <= y <= 1 + OUTSIDE):
+        raise ValueError('Straightening handles must lie on the image or just outside it.')
     return x * width, y * height
 
 
