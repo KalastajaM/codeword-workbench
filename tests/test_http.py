@@ -52,6 +52,9 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(code, 200)
         code, opened = self.request('/api/puzzles/' + saved['id'])
         self.assertEqual(opened['suggestions'], result)
+        self.assertEqual(saved['language'], 'en')
+        listed = [item for item in self.request('/api/puzzles')[1]['puzzles'] if item['id'] == saved['id']]
+        self.assertEqual(listed[0]['language'], 'en')
 
     def test_word_list_import_filters_and_reports_without_rewriting_words(self):
         code, result = self.request('/api/dictionaries/en/import', {

@@ -151,7 +151,7 @@ class PuzzleStore:
         for path in self.directory.glob('*.json'):
             try:
                 p = json.loads(path.read_text(encoding='utf-8'))
-                result.append({k: p[k] for k in ('id', 'name', 'updatedAt')})
+                result.append(dict({k: p[k] for k in ('id', 'name', 'updatedAt')}, language=p.get('language', '')))
             except (ValueError, OSError, KeyError, TypeError):
                 continue
         return sorted(result, key=lambda item: item['updatedAt'], reverse=True)
@@ -171,7 +171,7 @@ class PuzzleStore:
             temp = path.with_suffix('.tmp')
             temp.write_text(encoded, encoding='utf-8')
             os.replace(temp, path)
-        return {k: saved[k] for k in ('id', 'name', 'updatedAt')}
+        return {k: saved.get(k, '') for k in ('id', 'name', 'updatedAt', 'language')}
 
     def rename(self, key, name):
         if not isinstance(name, str) or not name.strip() or len(name) > 200:
@@ -184,7 +184,7 @@ class PuzzleStore:
             temp = path.with_suffix('.tmp')
             temp.write_text(json.dumps(saved, ensure_ascii=False, allow_nan=False), encoding='utf-8')
             os.replace(temp, path)
-        return {k: saved[k] for k in ('id', 'name', 'updatedAt')}
+        return {k: saved.get(k, '') for k in ('id', 'name', 'updatedAt', 'language')}
 
     def delete(self, key):
         path = self.path(key)
