@@ -84,18 +84,18 @@ function refreshDeductions(puzzle,retainAlternatives=true){
  if(previous||forcedLetters.some((l,i)=>l&&!puzzle.cells[i].letter))puzzle.suggestions={...previous,status:previous?.status||'mapping_deductions',solutions,forcedLetters,stats:{...previous?.stats,exhaustive:false},diagnostics:previous?.diagnostics||[]};
  else delete puzzle.suggestions;
 }
-// Correcting a cell's number moves the cell to the new number's letter.
-// An answer letter belonged to the old number and is cleared; a letter
-// printed in the grid (prefilled) stays. Confirmed letters of the new number
-// then show as a mapping deduction, never as a confirmed letter. Each kept
-// suggestion gives the cell the letter it has for the new number elsewhere
-// in the grid, or none. Returns false when nothing changed.
+// Correcting a cell's number moves the cell to the new number's letter, so
+// one letter never ends up on two numbers. The cell's own letter belonged
+// to the old number and is cleared, also when it was entered in Edit mode.
+// Confirmed letters of the new number then show as a mapping deduction,
+// never as a confirmed letter. Each kept suggestion gives the cell the
+// letter it has for the new number elsewhere in the grid, or none.
+// Returns false when nothing changed.
 function renumberCell(puzzle,index,number){
  const cell=puzzle.cells[index];if(!cell||cell.black||cell.number===number)return false;
  cell.number=number;cell.mappingAnchor=false;delete cell.numberReview;
- if(!cell.prefilled){cell.letter='';cell.guess='';}
+ cell.letter='';cell.guess='';cell.prefilled=false;
  const letterFor=letters=>{
-  if(cell.letter)return cell.letter;
   if(!number||puzzle.rules.maxLettersPerNumber!==1)return '';
   const other=puzzle.cells.findIndex((c,i)=>i!==index&&!c.black&&c.number===number&&(c.letter||letters?.[i]));
   return other<0?'':puzzle.cells[other].letter||letters[other];

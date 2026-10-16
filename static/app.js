@@ -400,6 +400,13 @@ $('letter-conflict-move').onclick=()=>{
 };
 function editLetter(letter){
  if(!editMode&&puzzle.cells[selected].prefilled)return;
+ // With one letter per number, the other cells of the number would keep
+ // showing the letter, so clearing it means removing it from the number
+ // (after confirmation, with undo).
+ const cell=puzzle.cells[selected],shown=cell.letter||suggestion(selected);
+ if(!letter&&cell.number&&shown&&puzzle.rules.maxLettersPerNumber===1&&PuzzleState.mappingLetterInfo(puzzle,cell.number,shown,solutionIndex).indices.length>1){
+  void protect(removeNumberAssignment)({...assignmentContext(),number:cell.number,letter:shown});return;
+ }
  const owners=PuzzleState.letterOwners(puzzle,selected,letter,solutionIndex);
  if(owners.length){
   if(pendingLetterConflict)return;

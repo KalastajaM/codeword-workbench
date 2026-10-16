@@ -598,11 +598,13 @@ test('Correcting a number moves the cell to the new number in confirmed letters 
  renumberCell(p, 2, '1'); refreshDeductions(p, true);
  assert.equal(p.cells[2].letter, ''); assert.equal(suggestedLetter(p, 2), 'C'); assert.equal(suggestionLabel(p, 2), 'Mapping deduction');
  assert.equal(p.suggestions.solutions.length, 1, 'Suggestions that contradict confirmed letters are dropped');
- // A printed (prefilled) letter stays and keeps suggestions that agree with it.
- p = make(); p.cells[2].letter = 'T'; p.cells[2].prefilled = true;
- renumberCell(p, 2, '9'); refreshDeductions(p, true);
- assert.equal(p.cells[2].letter, 'T'); assert.equal(p.suggestions.solutions.length, 2);
- assert.deepEqual(p.suggestions.solutions[0].letters, ['C','A','T','S']);
+ // A letter entered in Edit mode also follows the number, so one letter never sits on two
+ // numbers: S stays with 4 elsewhere and the corrected cell takes number 1's C.
+ p = make(); p.cells.push({...p.cells[3]}); p.rows = 1; p.cols = 5; p.cells[4] = {...p.cells[4], number:'4', letter:'S', prefilled:true};
+ p.cells[0].letter = 'C'; p.cells[3].letter = 'S'; p.cells[3].prefilled = true;
+ assert.equal(renumberCell(p, 3, '1'), true); refreshDeductions(p, true);
+ assert.equal(p.cells[3].letter, ''); assert.equal(p.cells[3].prefilled, false);
+ assert.equal(suggestedLetter(p, 3), 'C'); assert.equal(p.cells[4].letter, 'S');
  // Partial results follow the same rule; a cleared number takes no letter.
  p = make(); p.suggestions = {partialLetters:['C','A','T',''], solutions:[], stats:{}, diagnostics:[]};
  renumberCell(p, 2, '1'); assert.deepEqual(p.suggestions.partialLetters, ['C','A','C','']);
