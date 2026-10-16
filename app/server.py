@@ -80,8 +80,11 @@ def check_puzzle(p):
         for flag in ('clue', 'highlight', 'prefilled', 'mappingAnchor'):
             if flag in cell and type(cell[flag]) is not bool:
                 raise ValueError('Cell metadata settings must be true or false.')
-        if cell.get('numberReview') not in (None, 'check', 'missing') or cell.get('numberReview') and cell.get('black'):
-            raise ValueError('Number review marks are check or missing, on letter cells only.')
+        if cell.get('numberReview') not in (None, 'check', 'missing'):
+            raise ValueError('Number review marks are check or missing.')
+        if cell.get('black'):
+            # A cell turned into a block or picture area keeps no review mark.
+            cell.pop('numberReview', None)
         if cell.get('clue') and not cell.get('black'):
             raise ValueError('Image clue areas cannot also be letter cells.')
         for flag in ('openBeforeAcross', 'openAfterAcross', 'openBeforeDown', 'openAfterDown'):
@@ -713,6 +716,17 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
                             self.send_data(200, result)
                         finally:
                             slots.release()
+                            expensive.release()
+                elif method == 'POST' and path == '/api/straighten/detect':
+                    p = self.payload()
+                    if not expensive.acquire(blocking=False):
+                        self.send_data(429, {'error': 'Another solve or recognition is running. Try again shortly.'})
+                        return
+                    try:
+                        from .straighten import detect
+                        self.send_data(200, detect(p))
+                    finally:
+                        expensive.release()
                 elif method == 'POST' and path == '/api/straighten':
                     p = self.payload()
                     if not slots.acquire(blocking=False):
