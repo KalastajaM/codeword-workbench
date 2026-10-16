@@ -470,7 +470,7 @@ const solveJob=PuzzleState.solveRunner({
  onBusy:busy=>{for(const id of ['solve','solve-grid']){$(id).disabled=busy;$(id).textContent=busy?'Finding possibilities…':'Solve puzzle →';}$('cancel-solve').hidden=!busy;$('cancel-solve').disabled=false;$('cancel-solve').textContent='Cancel search';},
  onStopping:stopping=>{$('cancel-solve').disabled=stopping;$('cancel-solve').textContent=stopping?'Stopping…':'Cancel search';if(stopping)$('solve-status').textContent='Stopping search and keeping its best provisional result…';},
  onUpdate:(state,stopping)=>{
-  if(state.status==='running'||state.status==='queued'){const p=state.progress||{};$('solve-status').textContent=`${stopping?'Stopping search':String(p.stage||'Preparing search').replaceAll('_',' ')} · ${Number(p.nodes||0).toLocaleString()} search nodes · ${Number(p.elapsedSeconds||0).toFixed(1)} seconds · ${Number(p.solutionsFound||0)} suggestions found`;return;}
+  if(state.status==='running'||state.status==='queued'){$('solve-status').textContent=PuzzleState.solveProgressText(state.progress,stopping);return;}
   if(state.status==='failed'){$('solve-status').textContent='Search failed: '+(state.error||'Unknown error');notify($('solve-status').textContent,true);return;}
   const result=state.result;
   if(state.status==='cancelled'&&(!result||PuzzleState.cancelledResult(puzzle,result)!==result)){

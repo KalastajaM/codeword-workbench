@@ -339,9 +339,16 @@ class _Stopped(Exception):
 
 
 class _Control:
+    """Progress, cancellation and the search budget.
+
+    Preparation (indexing the word list, adapting the letter model) has no
+    deadline, so a large dictionary cannot use up a quick search before it
+    starts. start_budget() starts the clock.
+    """
     def __init__(self, started, seconds, node_limit, result, cancel, progress):
         self.started = started
-        self.deadline = started + seconds
+        self.seconds = seconds
+        self.deadline = math.inf
         self.node_limit = node_limit
         self.result = result
         self.cancel = cancel
@@ -360,6 +367,12 @@ class _Control:
         self.stage = stage
         if self.cancel and self.cancel(): raise _Stopped('cancelled')
         if now >= self.deadline: raise _Stopped('budget_exhausted', 'time_limit')
+
+    def start_budget(self):
+        if self.deadline == math.inf:
+            now = time.monotonic()
+            self.deadline = now + self.seconds
+            self.result['stats']['preparationSeconds'] = round(now-self.started, 3)
 
 
 def _compatible(slot, text, cells, letters, rules, known=None, owners=None):
@@ -623,13 +636,18 @@ def _missing_word_search(p, slots, domains, evidence, base, rules, result, contr
 
     state = reduce(assigned, {j: frozenset(d) for j, d in enumerate(domains)}, 0, {})
     if state is None: return
-    # A cap on unsupported words abandons poor early placements. Until a
-    # hypothesis exists, each cap gets a node slice and then widens.
-    step = max(2, len(slots)//10); best_cost = 3*step; found = {}; partial = None
+    # A cap on unsupported words abandons poor early placements. Under a
+    # loose cap, depth-first search settles into placements that leave many
+    # words unsupported and rarely backtracks out of them. So caps start at
+    # one and widen geometrically while no hypothesis exists, and each
+    # improvement restarts from the root with a cap just below it. Every
+    # start gets a node slice scaled to the search budget.
+    best_cost = 1; best_seen = None; found = {}; partial = None
     frames = []
+    slice_nodes = max(MISSING_WORD_PHASE_NODES, control.node_limit // 40)
 
     def push(assigned, open_, cost):
-        nonlocal best_cost, partial
+        nonlocal best_cost, best_seen, partial
         if cost > best_cost: return
         if open_:
             j = min(open_, key=lambda j: (len(open_[j]), -len(slot_keys[j]), j))
@@ -641,6 +659,7 @@ def _missing_word_search(p, slots, domains, evidence, base, rules, result, contr
         letters = ['' if c.get('black') else assigned.get(keys[i], '') for i, c in enumerate(cells)]
         unresolved = sum(1 for i, c in enumerate(cells) if not c.get('black') and not letters[i])
         best_cost = min(best_cost, cost)
+        best_seen = cost if best_seen is None else min(best_seen, cost)
         if unresolved:
             if partial is None or (cost, unresolved) < partial[0]: partial = ((cost, unresolved), letters)
         else:
@@ -649,13 +668,28 @@ def _missing_word_search(p, slots, domains, evidence, base, rules, result, contr
             if len(found) > MAX_SOLUTIONS: del found[max(found, key=found.get)]
 
     root = assigned
+    began = result['stats']['nodes']; now = time.monotonic()
+    # The last quarter of the budget goes to a dive without a cap when no
+    # hypothesis exists yet, so a poor hypothesis still beats none.
+    dive_nodes = control.node_limit - (control.node_limit - began) // 4
+    dive_time = control.deadline - (control.deadline - now) / 4
     try:
         while True:
-            push(root, *state); phase_end = result['stats']['nodes'] + MISSING_WORD_PHASE_NODES
+            start_seen = best_seen; next_cap = None
+            # The dive tightens by branch and bound instead of restarting.
+            push(root, *state); phase_end = result['stats']['nodes'] + slice_nodes if best_cost < len(slots) else control.node_limit
             while frames:
                 control.check('missing_word_search')
-                if result['stats']['nodes'] >= control.node_limit: raise _Stopped('budget_exhausted', 'node_limit')
-                if not (found or partial) and result['stats']['nodes'] >= phase_end:
+                nodes = result['stats']['nodes']
+                if nodes >= control.node_limit: raise _Stopped('budget_exhausted', 'node_limit')
+                if best_seen is None and best_cost < len(slots) and (nodes >= dive_nodes or time.monotonic() >= dive_time):
+                    next_cap = len(slots)
+                elif nodes >= phase_end:
+                    if best_seen is None: next_cap = max(best_cost + 1, best_cost * 3 // 2)
+                    elif best_seen > 0 and (start_seen is None or best_seen < start_seen): next_cap = best_seen - 1
+                    # This start did not improve: keep searching it.
+                    else: phase_end = control.node_limit
+                if next_cap is not None:
                     frames.clear(); break
                 frame = frames[-1]
                 assigned, open_, cost, j, options, k = frame
@@ -670,8 +704,11 @@ def _missing_word_search(p, slots, domains, evidence, base, rules, result, contr
                 child = {**assigned, **changed}
                 reduced = reduce(child, rest, cost, changed)
                 if reduced is not None: push(child, *reduced)
-            if found or partial or best_cost > len(slots): break
-            best_cost += step
+            if next_cap is None:
+                # An exhausted tree leaves no better hypothesis in the candidates.
+                if best_seen is not None or best_cost >= len(slots): break
+                next_cap = max(best_cost + 1, best_cost * 3 // 2)
+            best_cost = next_cap
     finally:
         # Budget stops and cancellation keep the best hypotheses found so far.
         _record_missing_word_results(p, slots, evidence, rules, result, found, partial)
@@ -742,12 +779,14 @@ def annotate_plausibility(puzzle, result):
 
 
 def solve(puzzle, words, *, morphology=None, cancel=None, progress=None):
-    with language_model.use(language_models_for(puzzle, words)):
-        result = _solve(puzzle, words, morphology=morphology, cancel=cancel, progress=progress)
+    # _solve adapts the models as a reported preparation stage.
+    models = {}
+    with language_model.use(models):
+        result = _solve(puzzle, words, morphology=morphology, cancel=cancel, progress=progress, models=models)
         return annotate_plausibility(puzzle, result)
 
 
-def _solve(puzzle, words, *, morphology=None, cancel=None, progress=None):
+def _solve(puzzle, words, *, morphology=None, cancel=None, progress=None, models=None):
     started = time.monotonic()
     mode = puzzle.get('searchMode', 'quick') if isinstance(puzzle, dict) else 'quick'
     deep = mode in ('deep','extended')
@@ -774,7 +813,10 @@ def _solve(puzzle, words, *, morphology=None, cancel=None, progress=None):
                 result.update(status='conflict', diagnostics=['Fixed number mappings force a forbidden letter pattern.'])
                 return result
         use_dictionary = p.get('useDictionary',True)
+        if use_dictionary: control.check('adapting_letter_model')
+        if models is not None: models.update(language_models_for(p, words))
         if not use_dictionary and rules['maxLettersPerNumber'] == 1:
+            control.start_budget()
             return _global_heuristic(p, slots, base, rules, result, started, control.deadline, control)
         use_morphology = use_dictionary and language == 'fi' and p.get('useMorphology',True) and morphology is not None
         optional = use_dictionary and p.get('allowUnknownWords',False)
@@ -783,6 +825,7 @@ def _solve(puzzle, words, *, morphology=None, cancel=None, progress=None):
         if index is not None:
             result['stats'].update(dictionaryWordsTotal=index.size, dictionaryWordsIndexed=index.indexed_size)
             result['diagnostics'].append(f'Word-length filter kept {index.indexed_size:,} of {index.size:,} dictionary entries for this puzzle; longer source words remain eligible for open fragments.')
+        control.start_budget()
         if use_dictionary and not index.size and not use_morphology and slots and not optional:
             result['stats']['stopReason']='empty_dictionary'
             result.update(status='empty_dictionary',diagnostics=['The selected dictionary is empty. Import words or disable the dictionary.'])

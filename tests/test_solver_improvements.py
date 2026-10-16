@@ -1,3 +1,4 @@
+import time
 import unittest
 from unittest.mock import patch
 from test_solver import puzzle
@@ -249,3 +250,72 @@ class ImprovementsTests(unittest.TestCase):
             r=solve(p,[],cancel=lambda:state['stop'])
         self.assertEqual(r['status'],'cancelled')
         self.assertNotIn('partialLetters',r)
+
+
+def missing_word_grid(seed):
+    """A 10×10 random-letter grid; five of its words are left out of a list
+    padded with 1,500 random strings per length. Deterministic per seed."""
+    import random
+    from app.solver import _slots
+    rnd = random.Random(seed); alphabet = 'ABCDEFGHIJKLMNOPQRST'
+    letters = [rnd.choice(alphabet) for _ in range(100)]
+    black = [rnd.random() < 0.25 for _ in range(100)]
+    order = sorted(set(letters))
+    p = puzzle(10, 10, [None if b else order.index(l)+1 for l, b in zip(letters, black)], allowUnknownWords=True)
+    for cell, b in zip(p['cells'], black): cell['black'] = b
+    words = sorted({''.join(letters[i] for i in s['cells']) for s in _slots(p)})
+    missing = set(rnd.sample(words, 5))
+    decoys = [''.join(rnd.choice(alphabet) for _ in range(n)) for n in range(2, 11) for _ in range(1500)]
+    return p, [w for w in words if w not in missing] + decoys
+
+
+class MissingWordScheduleTests(unittest.TestCase):
+    def test_tight_caps_find_fewest_unsupported_words(self):
+        # A first cap of many unsupported words let depth-first search settle
+        # on early placements: this grid ended with 8 unsupported words at the
+        # node limit. Caps rising from one find the 3 the list really lacks.
+        p, words = missing_word_grid(52)
+        with patch('app.solver.MAX_NODES', 3000), patch('app.solver.MAX_SECONDS', 60):
+            r = solve(p, words)
+        self.assertEqual(r['stats']['unsupportedWords'], 3)
+        self.assertLess(r['stats']['nodes'], 3000)
+
+    def test_budget_end_still_returns_a_hypothesis(self):
+        # Low caps cannot settle this grid within the budget; the reserved
+        # uncapped dive still returns a hypothesis instead of nothing.
+        p, words = missing_word_grid(2)
+        with patch('app.solver.MAX_NODES', 5000), patch('app.solver.MAX_SECONDS', 60):
+            r = solve(p, words)
+        self.assertEqual(r['stats']['stopReason'], 'node_limit')
+        self.assertIsNotNone(r['stats'].get('unsupportedWords'))
+        self.assertTrue(r['solutions'] or r.get('partialLetters'))
+
+
+class PreparationBudgetTests(unittest.TestCase):
+    def test_indexing_and_letter_model_are_outside_the_search_budget(self):
+        from app import solver
+        original = solver.WordIndex
+        def slow_index(*args, **kwargs):
+            time.sleep(.3)
+            return original(*args, **kwargs)
+        events = []
+        with patch('app.solver.WordIndex', side_effect=slow_index), patch('app.solver.MAX_SECONDS', .2):
+            r = solve(puzzle(1,3,[1,2,3]), ['CAT'], progress=events.append)
+        self.assertEqual(r['status'], 'solutions_found')
+        self.assertGreaterEqual(r['stats']['preparationSeconds'], .3)
+        stages = [e['stage'] for e in events]
+        for stage in ('adapting_letter_model', 'indexing_dictionary', 'generating_candidates'):
+            self.assertIn(stage, stages)
+        self.assertLess(stages.index('adapting_letter_model'), stages.index('indexing_dictionary'))
+        self.assertLess(stages.index('indexing_dictionary'), stages.index('generating_candidates'))
+
+    def test_cancel_still_works_during_preparation(self):
+        from app import solver
+        original = solver.WordIndex
+        state = {'stop': False}
+        def index(*args, **kwargs):
+            state['stop'] = True
+            return original(*args, **kwargs)
+        with patch('app.solver.WordIndex', side_effect=index):
+            r = solve(puzzle(1,3,[1,2,3]), ['CAT'], cancel=lambda: state['stop'])
+        self.assertEqual(r['status'], 'cancelled')
