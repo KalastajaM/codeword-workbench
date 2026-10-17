@@ -175,8 +175,8 @@ $('rule-out-all').onclick=()=>{const groups=PuzzleState.eliminationSuggestionGro
 function rejectWord(slot,word,rejected=true){if(!PuzzleState.setWordRejected(puzzle,slot,word,rejected))return;invalidate();render();$('solve-status').textContent=rejected?`${word} rejected for this word. Solve again for other suggestions.`:`${word} allowed again for this word.`;}
 function renderCurrentWordRejection(current){
  const box=$('current-word-rejection'),full=PuzzleState.completeWordText(puzzle,current,solutionIndex),rejected=PuzzleState.rejectedWordsFor(puzzle,current),canReject=!!(full&&full.provisional);
- box.hidden=!current||(!canReject&&!rejected.length);if(box.hidden)return;
- const button=$('reject-current-word');button.hidden=!canReject;if(canReject){button.textContent=`${full.text} is wrong here`;button.onclick=()=>rejectWord(current,full.text);}
+ const button=$('reject-current-word');button.hidden=!current||!canReject;if(!button.hidden){button.textContent=`${full.text} is wrong here`;button.onclick=()=>rejectWord(current,full.text);}
+ box.hidden=!current||!rejected.length;if(box.hidden)return;
  const list=$('current-rejected-words');list.replaceChildren();list.hidden=!rejected.length;
  if(rejected.length)list.append('Rejected here:');
  for(const word of rejected){const restore=document.createElement('button');restore.type='button';restore.className='ruled-out-letter';restore.textContent=word;restore.title=`Allow ${word} here again`;restore.setAttribute('aria-label',restore.title);restore.onclick=()=>rejectWord(current,word,false);list.append(restore);}
