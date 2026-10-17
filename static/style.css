@@ -178,10 +178,16 @@ button.rule-out-group{padding:3px 7px;font-size:11px;background:transparent;colo
 
 .certainty-close-dot{background:#f2a68c}.certainty-moderate-dot{background:#f7d6c8}#certainty-legend{display:flex;align-items:center;gap:5px}.certainty-controls{margin-top:10px}
 .image-mode .cell.certainty-close:not(.black){background-color:rgba(242,166,140,.75)}.image-mode .cell.certainty-moderate:not(.black){background-color:rgba(247,214,200,.7)}
+#check-answers{margin-top:8px}
 /* Generated puzzles: letters the answer check found wrong. */
 .cell.wrong:not(.black){box-shadow:inset 0 0 0 3px #e0443a}
 #print-dialog{max-width:860px}.print-options{display:flex;flex-wrap:wrap;gap:6px 22px}.print-options label{margin:6px 0}
 .print-preview{background:#fff;border-radius:8px;padding:10px;max-height:60vh;overflow:auto;display:flex;flex-direction:column;gap:12px;align-items:center}.print-preview svg{max-width:100%;height:auto}
 #print-sheet{display:none}
 @media print{body.printing>*:not(#print-sheet){display:none!important}body.printing{background:#fff}body.printing #print-sheet{display:block}#print-sheet svg{display:block;width:100%;height:auto;max-height:100vh;page-break-after:always;break-after:page}#print-sheet svg:last-child{page-break-after:auto;break-after:auto}}
+.replay-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}.replay-controls input[type=range]{flex:1;min-width:120px;accent-color:var(--teal)}.replay-controls .hint{margin:0;min-width:180px}
+button[aria-disabled=true]{opacity:.4;cursor:default}button[aria-disabled=true]:hover{background:#1b293b}
+#image-adjustments summary .help-button{margin-left:8px;vertical-align:middle}
+.range-field{display:flex;align-items:center;gap:10px}.range-field input{flex:1;min-width:0;margin:0}
+#remove-image{margin-bottom:10px}
 #busy-dialog{max-width:440px}#busy-dialog progress{width:100%;height:8px;accent-color:var(--teal)}#busy-dialog .dialog-actions{justify-content:flex-end}

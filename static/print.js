@@ -21,12 +21,15 @@ function numberAnchor(position,x,y){
  return {x:right?x+CELL-3:x+3,y:bottom?y+CELL-4:y+11,anchor:right?'end':'start'};
 }
 // options: solution (letters per cell, or null) and key (number key and alphabet strip).
-function sheetSvg(puzzle,{solution=null,key=true}={}){
+// grade, when given, is printed as the difficulty beside the title.
+function sheetSvg(puzzle,{solution=null,key=true,grade=null}={}){
  const width=puzzle.cols*CELL,height=puzzle.rows*CELL,given=givenLetters(puzzle);
  const position=puzzle.numberPosition||'top-left';
  const parts=[];
  const title=(puzzle.name||'Codeword')+(solution?' · solution':'');
  parts.push(`<text x="${MARGIN}" y="${MARGIN+18}" font-size="20" font-weight="700">${escape(title)}</text>`);
+ const level={easy:'Easy',medium:'Medium',hard:'Hard'}[grade];
+ if(level)parts.push(`<text x="${MARGIN+width}" y="${MARGIN+18}" font-size="13" text-anchor="end" fill="#555">Difficulty: ${level}</text>`);
  const top=MARGIN+TITLE;
  puzzle.cells.forEach((cell,i)=>{
   const x=MARGIN+(i%puzzle.cols)*CELL,y=top+Math.floor(i/puzzle.cols)*CELL;

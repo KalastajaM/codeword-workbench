@@ -662,3 +662,12 @@ test('Only inputs that change the puzzle interrupt a running search', () => {
  for(const key of ['a','7',' ','Backspace','Delete'])assert.equal(stops({type:'keydown',key,grid:true}),true,`${JSON.stringify(key)} edits the grid`);
  assert.equal(stops({type:'keydown',key:'z',grid:true,modifier:true}),false,'Browser shortcuts are left alone');
 });
+test('App numbers move to the opposite corner only over an image', () => {
+ const {displayNumberPosition} = require('../static/state.js');
+ assert.equal(displayNumberPosition({numberPosition:'top-left'}), 'top-left');
+ assert.equal(displayNumberPosition({numberPosition:'bottom-right'}), 'bottom-right');
+ assert.equal(displayNumberPosition({numberPosition:'top-left', image:'data:x'}), 'bottom-right');
+ assert.equal(displayNumberPosition({numberPosition:'top-right', image:'data:x'}), 'bottom-left');
+ assert.equal(displayNumberPosition({numberPosition:'bottom-left', image:'data:x'}), 'top-right');
+ assert.equal(displayNumberPosition({numberPosition:'bogus', image:'data:x'}), 'bottom-right');
+});

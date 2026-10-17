@@ -22,12 +22,16 @@ one cell, word or mapping at a time.
   take another letter at almost no cost are outlined, so you know where to
   check first. The same models flag implausible words.
 - **Make your own puzzles:** draw a grid, optionally fix some numbers and
-  letters, and generate a codeword filled from your word list. Solve it in the
-  app with an answer check, or print it with its number key and solution.
+  letters or list words to include, and generate a codeword filled from your
+  word list. Choose Easy, Medium or Hard: the app grades the puzzle by solving
+  it step by step and gives letters until it fits, with only one answer.
+  Solve it in the app with an answer check, or print it with its number key
+  and solution.
 =======
   installed; **Quick** search was not enough. The grid shows the best guess
   live, shaded by how clearly each letter beats its best rival, so you know
-  where to check first. The same models flag implausible words.
+  where to check first. Afterwards, a replay steps through how the grid
+  settled. The same models flag implausible words.
 >>>>>>> origin/main
 - **Honest output:** confirmed letters stay separate from suggestions, and
   every suggested word says what supports it.
@@ -78,8 +82,8 @@ more. On a 4-core Linux container:
 
 | Configuration | Grids fully right | Worst grid | Time |
 |---|---|---|---|
-| No dictionary, Quick | 6 of 10 | 98.3% of cells | 2.9 s (final answer first shown after 0.4 s) |
-| No dictionary, Deep | 6 of 10 | 98.3% of cells | 60 s |
+| No dictionary, Quick | 6 of 10 | 98.3% of cells | 2.1 s (final answer first shown after 0.2 s) |
+| No dictionary, Deep | 6 of 10 | 98.3% of cells | 51 s (stops at its node limit) |
 | Webster's 2nd (236,000 words), Quick or Deep | 10 of 10 | 100% | about 1 s, including indexing |
 
 Without a dictionary, the 6 wrong cells were all shaded coral (close

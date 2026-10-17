@@ -203,6 +203,7 @@ ul{margin:0;padding-left:20px;display:grid;gap:6px;max-width:68ch}
         <li>Runs restart with a shuffled alphabet and a fixed seed. Each run's best mapping is polished with single improving moves until none helps.</li>
         <li>A polished mapping is kept only if it differs from every kept one in at least <span data-fact="MIN_MAPPING_DISTANCE">3</span> numbers (fewer on tiny grids), so the <span data-fact="MAX_SOLUTIONS">12</span> alternatives are distinct guesses, not one guess with a letter swapped.</li>
         <li>While the search runs, the grid shows the best mapping so far. Afterwards, each number's letter is compared with its best rival letter: within <span data-fact="CLOSE_MARGIN">5</span> points the cell is shaded coral (check first), within <span data-fact="CLEAR_MARGIN">15</span> light coral, beyond that unshaded.</li>
+        <li>Every improvement of the best mapping is recorded; up to <span data-fact="REPLAY_FRAMES">60</span> evenly spread steps, ending on the top alternative, can be replayed with their shading after the search.</li>
       </ul>
     </div>
   </div>
