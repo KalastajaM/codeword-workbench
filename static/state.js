@@ -31,18 +31,46 @@ function suggestedLetter(puzzle,index,solutionIndex=0){
  const cell=puzzle.cells[index];if(!cell||cell.black)return '';
  return puzzle.suggestions?.forcedLetters?.[index]||puzzle.suggestions?.solutions?.[solutionIndex]?.letters?.[index]||puzzle.suggestions?.partialLetters?.[index]||cell.guess||'';
 }
+// Dictionary results carry no per-number margins, so compare the kept
+// alternatives instead: a number's rival is the best other alternative that
+// gives it a different letter, and the margin is the score gap between the two.
+// Alternatives with fewer dictionary-supported words rank below whatever their
+// score, so they are not rivals; one with more is always a close rival.
+// No rival among the kept alternatives gives a clear lead, which is not proof:
+// the search keeps only its best alternatives and may stop at a limit.
+function dictionaryMargins(puzzle,solutionIndex=0){
+ const solutions=puzzle.suggestions?.solutions,selected=solutions?.[solutionIndex];
+ if(!Array.isArray(selected?.letters)||solutions.some(s=>s.numberMargins))return null;
+ const lettersByNumber=solution=>{const map={};puzzle.cells.forEach((cell,i)=>{const letter=solution.letters?.[i],number=String(Number(cell.number));if(!cell.black&&cell.number&&letter&&!(number in map))map[number]=letter;});return map;};
+ const support=selected.supportedWords??0,others=solutions.map((s,index)=>({index,support:s.supportedWords??0,score:s.score,letters:lettersByNumber(s)})).filter(o=>o.index!==solutionIndex&&o.support>=support);
+ const margins={};
+ for(const [number,letter] of Object.entries(lettersByNumber(selected))){
+  let rival=null;
+  for(const other of others){
+   const alternative=other.letters[number];if(!alternative||alternative===letter)continue;
+   const moreSupport=other.support>support,margin=moreSupport?0:Math.max(0,Math.round((selected.score-other.score)*100)/100);
+   if(!rival||margin<rival.margin)rival={alternative,margin,alternativeIndex:other.index,moreSupport};
+  }
+  margins[number]=rival||{alternative:null,margin:null};
+ }
+ return margins;
+}
+function certaintyMargins(puzzle,solutionIndex=0){return puzzle.suggestions?.solutions?.[solutionIndex]?.numberMargins||dictionaryMargins(puzzle,solutionIndex);}
 // How clearly each open cell's letter leads its number's best rival in the
-// selected dictionary-free alternative: 'close' (check first), 'moderate' or
-// 'clear'. A clear lead is not proof the letter is right.
+// selected alternative: 'close' (check first), 'moderate' or 'clear'. A clear
+// lead is not proof the letter is right. Dictionary-free results carry margins
+// for single-letter rivals; dictionary results compare whole alternatives.
 // liveMargins shades a running search's preview instead of a finished alternative.
 function letterCertainty(puzzle,solutionIndex=0,liveMargins){
- const margins=liveMargins||puzzle.suggestions?.solutions?.[solutionIndex]?.numberMargins,stats=liveMargins?{}:puzzle.suggestions?.stats||{};
+ const margins=liveMargins||certaintyMargins(puzzle,solutionIndex),stats=liveMargins?{}:puzzle.suggestions?.stats||{};
  const close=stats.closeMargin??5,clear=stats.clearMargin??15;
  return puzzle.cells.map(cell=>{
   if(!margins||cell.black||cell.letter||!cell.number)return null;
   const number=String(Number(cell.number)),info=margins[number];
   if(!info)return null;
-  return {number,alternative:info.alternative,margin:info.margin,level:info.margin<close?'close':info.margin<clear?'moderate':'clear'};
+  if(info.alternative===null)return {number,alternative:null,margin:null,level:'clear'};
+  const level=info.margin<close?'close':info.margin<clear?'moderate':'clear';
+  return 'alternativeIndex' in info?{number,alternative:info.alternative,margin:info.margin,level,alternativeIndex:info.alternativeIndex,moreSupport:info.moreSupport}:{number,alternative:info.alternative,margin:info.margin,level};
  });
 }
 function suggestionLabel(puzzle,index,solutionIndex=0){
@@ -587,5 +615,5 @@ function solveProgressText(progress,stopping){
 // numberPosition is where the puzzle prints its numbers. Over an image the
 // app's numbers go in the opposite corner so they do not cover the print.
 function displayNumberPosition(puzzle){const position=['top-left','top-right','bottom-left','bottom-right'].includes(puzzle.numberPosition)?puzzle.numberPosition:'top-left';if(!puzzle.image)return position;const [vertical,horizontal]=position.split('-');return `${vertical==='top'?'bottom':'top'}-${horizontal==='left'?'right':'left'}`;}
-const helpers={displayNumberPosition,layoutSummary,layoutSummaryText,meetsLayout,generatedSummary,generatedAnswer,answerCheck,answerCheckText,letterCertainty,savedPuzzleView,renumberCell,workspaceModeView,visibleRuledOut,numberIsOpen,canonicalEliminations,ruledOutLetters,setRuledOut,slotIdentity,rejectedWordsFor,setWordRejected,eliminationSuggestionGroups,wordAssessmentQueue,assessedWord,assessedWordLabel,displayedPuzzleWords,solvedWordActions,solvedWordEvidence,solvedWordsView,solvedWordSelection,solvedWordPatternScore,mappingCyclePlan,numberMovePlan,clearMappingProvenance,numberRemovalPlan,numberAssignmentPlan,dictionaryInputWords,dictionarySearchSummary,nordicLetters,completeWordText,selectedWordCheckText,patternScoreText,candidateEvidenceText,wordLookupText,lookupPattern,dictionaryPages,languagePresentation,dictionaryEditor,cellWord,letterOwners,moveLetterAssignment,resetSuggestions,editConfirmedLetter,cancelledResult,searchInterruption,solveProgressText,solveStopExplanation,hasSolveProgress,mappingLetterInfo,changeMappingLetter,resetProgress,suggestionLabel,restoredWords,wordEvidenceLabel,plausibilityLabel,plausibilityDetail,candidateDisplay,solveRunner,canonicalPuzzle,slots,candidateLetters,matchesSlot,blankCell,numberEntry,imageBoundsFromPercent,fitScale,suggestedLetter,mappingDeductions,solveSummary,refreshDeductions,confirmCells,unconfirmCells,numberCells,undoConfirmation,acceptanceHistory,wordChoices,candidateSelection,candidateSearchPuzzle};if(typeof module!=='undefined'&&module.exports)module.exports=helpers;else root.PuzzleState=helpers;
+const helpers={displayNumberPosition,layoutSummary,layoutSummaryText,meetsLayout,generatedSummary,generatedAnswer,answerCheck,answerCheckText,letterCertainty,certaintyMargins,savedPuzzleView,renumberCell,workspaceModeView,visibleRuledOut,numberIsOpen,canonicalEliminations,ruledOutLetters,setRuledOut,slotIdentity,rejectedWordsFor,setWordRejected,eliminationSuggestionGroups,wordAssessmentQueue,assessedWord,assessedWordLabel,displayedPuzzleWords,solvedWordActions,solvedWordEvidence,solvedWordsView,solvedWordSelection,solvedWordPatternScore,mappingCyclePlan,numberMovePlan,clearMappingProvenance,numberRemovalPlan,numberAssignmentPlan,dictionaryInputWords,dictionarySearchSummary,nordicLetters,completeWordText,selectedWordCheckText,patternScoreText,candidateEvidenceText,wordLookupText,lookupPattern,dictionaryPages,languagePresentation,dictionaryEditor,cellWord,letterOwners,moveLetterAssignment,resetSuggestions,editConfirmedLetter,cancelledResult,searchInterruption,solveProgressText,solveStopExplanation,hasSolveProgress,mappingLetterInfo,changeMappingLetter,resetProgress,suggestionLabel,restoredWords,wordEvidenceLabel,plausibilityLabel,plausibilityDetail,candidateDisplay,solveRunner,canonicalPuzzle,slots,candidateLetters,matchesSlot,blankCell,numberEntry,imageBoundsFromPercent,fitScale,suggestedLetter,mappingDeductions,solveSummary,refreshDeductions,confirmCells,unconfirmCells,numberCells,undoConfirmation,acceptanceHistory,wordChoices,candidateSelection,candidateSearchPuzzle};if(typeof module!=='undefined'&&module.exports)module.exports=helpers;else root.PuzzleState=helpers;
 })(typeof globalThis!=='undefined'?globalThis:this);
