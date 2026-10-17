@@ -22,6 +22,10 @@ DEEP_NODES=1000000
 MAX_SOLUTIONS=12
 # Dictionary-free alternatives must differ in at least this many numbers.
 MIN_MAPPING_DISTANCE=3
+# Dictionary-free letters whose best rival scores within this many points are
+# marked as weakly supported. Chosen on test grids: it caught every wrong
+# letter there, along with a few right ones.
+WEAK_MARGIN=5.0
 BEAM_WIDTH=64
 MAX_FRONTIER_CELLS=200000
 
@@ -271,6 +275,10 @@ def _global_heuristic(p, slots, base, rules, result, started, deadline, control)
             del solutions[worst]
         solutions[key]=score
         result['stats']['heuristicSolutionsFound']=len(solutions)
+        if score>=max(solutions.values()):
+            preview=['']*len(p['cells'])
+            for i,v in cell_var.items(): preview[i]=assignment[v]
+            result['preview']=preview
     def propose(assignment, values, v, letter):
         """Apply a move in place; None when it would take a confirmed letter."""
         changes={v:letter}
@@ -356,11 +364,35 @@ def _global_heuristic(p, slots, base, rules, result, started, deadline, control)
         stopped_status = stopped.status; stopped_reason = stopped.reason
     # A run cut short by the budget or cancellation keeps its best state unpolished.
     if run_best: keep(run_best[1],run_best[0])
+    number_of={v:key[1] for key,v in groups.items() if key[0]=='number'}
+    def weak_numbers(assignment):
+        """Numbers where another letter scores within WEAK_MARGIN of this mapping.
+
+        A small margin means the letter models barely prefer this letter: the
+        place to check first. A large margin is not proof the letter is right.
+        """
+        assignment=list(assignment)
+        values=[evaluate(j,assignment) for j in range(len(slot_vars))]
+        weak={}
+        for v in movable:
+            if v not in number_of: continue
+            best=None
+            for letter in alphabet:
+                if letter==assignment[v]: continue
+                moved=propose(assignment,values,v,letter)
+                if moved is None: continue
+                old,updated,gain,broken=moved
+                for u,l in old.items(): assignment[u]=l
+                if broken<=0 and (best is None or gain>best[0]): best=(gain,letter)
+            if best and -best[0]<WEAK_MARGIN:
+                weak[number_of[v]]=dict(alternative=best[1],margin=round(max(0.0,-best[0]),2))
+        return weak
     for assignment,score in sorted(solutions.items(),key=lambda item:-item[1]):
         letters=['']*len(p['cells'])
         for i,v in cell_var.items(): letters[i]=assignment[v]
         solution_words=[dict(cells=s['cells'],text=''.join(letters[i] for i in s['cells']),verified=False,source='unverified') for s in slots]
-        result['solutions'].append(dict(letters=letters,score=round(score,3),words=solution_words))
+        result['solutions'].append(dict(letters=letters,score=round(score,3),words=solution_words,weakNumbers=weak_numbers(assignment)))
+    result['stats']['weakMargin']=WEAK_MARGIN
     result['stats'].update(nodes=iterations,restarts=restarts,polishedRuns=polished,minimumNumbersDifferent=spread,elapsedSeconds=round(time.monotonic()-started,3),solutionLimit=MAX_SOLUTIONS)
     result['wordCandidates']=[dict(cells=s['cells'],direction=s['direction'],candidates=list(dict.fromkeys(solution['words'][j]['text'] for solution in result['solutions'])),partial=s['before'] or s['after'],verified=False) for j,s in enumerate(slots)]
     if stopped_status:
@@ -408,9 +440,12 @@ class _Control:
         now = time.monotonic()
         stage = stage or self.stage or 'preparing'
         if self.progress and (force or stage != self.stage or now-self.last_progress >= .1):
-            self.progress(dict(stage=stage, nodes=self.result['stats']['nodes'],
-                               elapsedSeconds=round(now-self.started, 3),
-                               solutionsFound=max(len(self.result['solutions']),self.result['stats'].get('heuristicSolutionsFound',0))))
+            update = dict(stage=stage, nodes=self.result['stats']['nodes'],
+                          elapsedSeconds=round(now-self.started, 3),
+                          solutionsFound=max(len(self.result['solutions']),self.result['stats'].get('heuristicSolutionsFound',0)))
+            # The best unverified mapping so far, for display while searching.
+            if self.result.get('preview'): update['preview'] = self.result['preview']
+            self.progress(update)
             self.last_progress = now
         self.stage = stage
         if self.cancel and self.cancel(): raise _Stopped('cancelled')
@@ -1009,6 +1044,7 @@ def _solve(puzzle, words, *, morphology=None, cancel=None, progress=None, models
     finally:
         if result['stats']['limitsReached']: result['stats']['exhaustive']=False
         for solution in result['solutions']: solution.pop('rawScore', None)
+        result.pop('preview', None)
         if result['stats'].get('moreSolutions') and result['solutions']:
             result['diagnostics'].append(
                 f'More than {MAX_SOLUTIONS} solutions fit the searched candidates; these are the {MAX_SOLUTIONS} highest-scoring.'

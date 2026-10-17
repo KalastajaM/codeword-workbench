@@ -204,6 +204,28 @@ class ImprovementsTests(unittest.TestCase):
         self.assertTrue(any('3 highest-scoring' in d for d in r['diagnostics']))
         self.assertTrue(all('rawScore' not in s for s in r['solutions']))
 
+    def test_dictionary_free_results_mark_numbers_with_close_rivals(self):
+        p=puzzle(2,3,[1,2,3,3,2,1],useDictionary=False)
+        with patch('app.solver.MAX_NODES',3000): r=solve(p,[])
+        self.assertEqual(r['stats']['weakMargin'],solver.WEAK_MARGIN)
+        for s in r['solutions']:
+            for number,info in s['weakNumbers'].items():
+                self.assertIn(number,{'1','2','3'})
+                self.assertLess(info['margin'],solver.WEAK_MARGIN)
+                self.assertGreaterEqual(info['margin'],0)
+                self.assertNotEqual(info['alternative'],s['letters'][[c['number'] for c in p['cells']].index(number)])
+        with patch('app.solver.WEAK_MARGIN',1e9), patch('app.solver.MAX_NODES',3000): wide=solve(p,[])
+        self.assertEqual(set(wide['solutions'][0]['weakNumbers']),{'1','2','3'},'Every movable number has a rival')
+
+    def test_dictionary_free_progress_streams_best_mapping(self):
+        p=puzzle(10,10,[i%26+1 for i in range(100)],useDictionary=False)
+        events=[]
+        with patch('app.solver.MAX_SECONDS',.6): r=solve(p,[],progress=events.append)
+        previews=[e['preview'] for e in events if 'preview' in e]
+        self.assertTrue(previews)
+        self.assertTrue(all(len(x)==len(p['cells']) and all(x) for x in previews))
+        self.assertNotIn('preview',r)
+
     def test_dictionary_free_alternatives_are_distinct_local_optima(self):
         numbers={}; cells=[numbers.setdefault(ch,len(numbers)+1) for ch in 'HEARTEMBERABUSERESINTREND']
         p=puzzle(5,5,cells,useDictionary=False)

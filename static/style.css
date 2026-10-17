@@ -174,3 +174,5 @@ button.rule-out-group{padding:3px 7px;font-size:11px;background:transparent;colo
 .saved-filter{display:flex;align-items:center;gap:8px;margin-top:6px}.saved-filter select{width:auto}.saved-language{color:var(--muted);font-size:12px;margin-left:auto;flex:0 0 5.5em;text-align:left}
 .intro-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.intro .button{background:transparent}
 @media(max-width:700px){.intro-actions{flex-direction:column;align-items:stretch}.intro .button{font-size:11px;padding:8px;max-width:100px}}
+.cell .live{color:#2f6f8f;opacity:.85;transition:color .2s}
+.cell.weak:not(.black){box-shadow:inset 0 0 0 3px #e0782f}.weak-toggle{margin:6px 0 2px}

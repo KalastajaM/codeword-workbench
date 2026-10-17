@@ -63,6 +63,7 @@ def expected_facts():
         'MAX_CANDIDATES': solver.MAX_CANDIDATES,
         'MAX_SOLUTIONS': solver.MAX_SOLUTIONS,
         'MIN_MAPPING_DISTANCE': solver.MIN_MAPPING_DISTANCE,
+        'WEAK_MARGIN': solver.WEAK_MARGIN,
         'MISSING_WORD_CANDIDATES': solver.MISSING_WORD_CANDIDATES,
         'MAX_FRAGMENTS': word_index.MAX_FRAGMENTS,
         'MAX_FRONTIER_CELLS': solver.MAX_FRONTIER_CELLS,

@@ -1,9 +1,11 @@
 # Getting dictionaries
 
 Codeword Workbench ships only small demonstration word lists and letter-pattern models
-(`app/models/`, counts only, no word lists). Real puzzles need a full word list
-for each language you solve. This page lists free sources and how to turn each
-into the import format.
+(`app/models/`, counts only, no word lists). A full word list is optional:
+without one, a **Deep** search with **Use dictionary** off has solved full-size
+printed puzzles in testing. A list lets search place known words and gives
+each suggested word dictionary evidence. This page lists free sources and how
+to turn each into the import format.
 
 ## Import format
 
