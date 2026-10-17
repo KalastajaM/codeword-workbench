@@ -665,7 +665,7 @@ $('generate').onclick=protect(async()=>{
  if(include.length>30)throw new Error('List up to 30 words to include.');
  if(!Number.isInteger(starters)||starters<0||starters>10)throw new Error('Starter letters must be a whole number from 0 to 10.');
  if(puzzle.image)throw new Error('Generating works on a drawn grid. Remove the image first, or create a new grid.');
- if(puzzle.cells.some(c=>!c.black&&!c.prefilled&&c.letter||c.guess)&&!await confirmAction('Generating replaces answer letters and suggestions. Letters entered in Edit mode are kept as given letters.','Generate a new puzzle?'))return;
+ if(puzzle.cells.some(c=>!c.black&&!c.prefilled&&c.letter||c.guess)&&!await confirmAction('Generating replaces answer letters and suggestions. Words typed in full in Edit mode stay as answers; other letters entered in Edit mode are kept as given letters.','Generate a new puzzle?'))return;
  const {generated,suggestions,image,...grid}=JSON.parse(JSON.stringify(puzzle));
  // Only letters entered in Edit mode are fixed; answer letters are not.
  grid.cells=grid.cells.map(cell=>({...cell,letter:cell.prefilled?cell.letter:'',guess:''}));
@@ -730,7 +730,9 @@ $('place-blocks').onclick=protect(async()=>{
   const result=await api('/api/layout',{puzzle:grid,target});
   if(current!==puzzle||version!==revision){$('layout-status').textContent='The grid changed while placing, so the layout was not applied.';return;}
   if(!result.valid){$('layout-status').textContent='No layout meets these word lengths for this grid. Widen the lengths or change the grid size.';return;}
-  layoutTarget=target;setBlacks(result.black);placedLayout={puzzle,previous,key:blackKey()};
+  layoutTarget=target;
+  if(result.black.every((black,i)=>black===!!puzzle.cells[i].black)){render();$('layout-status').textContent=result.exact?`Nothing changed: the grid already meets this target with ${result.words} words of ${result.shortest}–${result.longest} letters. Ask for more or shorter words for a different layout.`:`Nothing changed: no layout closer to ${target.words} words was found than the grid as it is, with ${result.words} words of ${result.shortest}–${result.longest} letters.`;return;}
+  setBlacks(result.black);placedLayout={puzzle,previous,key:blackKey()};
   invalidate();render();
   $('layout-status').textContent=result.exact?`Placed: ${result.words} words of ${result.shortest}–${result.longest} letters.`:`The closest layout found has ${result.words} words of ${result.shortest}–${result.longest} letters; you asked for ${target.words}.`;
  }finally{$('place-blocks').disabled=!editMode;}

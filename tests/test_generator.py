@@ -201,6 +201,27 @@ class FillTests(unittest.TestCase):
         self.assertTrue(all(c['letter'] == 'O' for c, a in zip(result['cells'], result['answer']) if a == 'O'),
                         'A given letter shows in every cell of its number')
 
+    def test_words_typed_in_full_stay_hidden_even_when_missing_from_the_dictionary(self):
+        p = grid(['TONA', '.#.#', '....'])
+        for seed in range(4):
+            result = generate(p, WORDS, seed=seed, starters=0, unique=False, difficulty='any')
+            with self.subTest(seed=seed):
+                self.assertEqual(result['status'], 'generated', result)
+                self.assertEqual(words_in(p, result['answer'])[0], 'TONA')
+                self.assertEqual(result['diagnostics'], ['TONA, typed in the grid, is not in the dictionary and counted as a word for this puzzle only.'])
+                self.assertTrue(all(not result['cells'][i]['letter'] for i in range(4) if result['answer'][i] not in result['givens']),
+                                'Typed words are answers, not given letters')
+                self.assertEqual(result['givens'], [], 'With no starters asked for, nothing is given')
+                self.assertEqual(len(set(words_in(p, result['answer']))), len(layout(p)), 'No word is repeated')
+
+    def test_typed_words_cannot_repeat(self):
+        from app.generator import prepare
+        p = grid(['CANE', '.#.#', 'CANE'])
+        with self.assertRaisesRegex(ValueError, 'CANE is typed in the grid more than once'):
+            prepare(p, {})
+        with self.assertRaisesRegex(ValueError, 'CANE is typed in the grid and also listed'):
+            prepare(grid(['CANE', '.#.#', '....']), dict(include=['cane']))
+
     def test_fixed_numbers_are_kept_and_force_equal_or_distinct_letters(self):
         p = grid(['1..1', '#.#.', '2..2'])
         words = ['TENT', 'NOON', 'TOOT', 'EVE', 'TEN', 'NET', 'ONE', 'EON', 'NOT', 'TON', 'NEON', 'NOTE', 'TOTE']
