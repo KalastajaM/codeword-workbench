@@ -190,3 +190,4 @@ button[aria-disabled=true]{opacity:.4;cursor:default}button[aria-disabled=true]:
 #image-adjustments summary .help-button{margin-left:8px;vertical-align:middle}
 .range-field{display:flex;align-items:center;gap:10px}.range-field input{flex:1;min-width:0;margin:0}
 #remove-image{margin-bottom:10px}
+#busy-dialog{max-width:440px}#busy-dialog progress{width:100%;height:8px;accent-color:var(--teal)}#busy-dialog .dialog-actions{justify-content:flex-end}
