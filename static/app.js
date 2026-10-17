@@ -11,10 +11,11 @@ let candidateKeys=new Set(),candidateResult=null,candidateBusy=false,candidateRe
 let solvedWordFilter='all',solvedWordSort='uncertain';
 function notify(message,error=false){$('notice').textContent=message;$('notice').classList.toggle('error',error);$('notice').hidden=false;}
 let confirmPending=null;
-function confirmAction(message,title="Replace current work?"){
+function confirmAction(message,title="Replace current work?",labels={}){
  if(confirmPending)return Promise.resolve(false);
  const dialog=$('confirm-dialog');
  $('confirm-title').textContent=title;$('confirm-message').textContent=message;
+ $('confirm-continue').textContent=labels.confirm||'Continue';$('confirm-cancel').textContent=labels.cancel||'Cancel';
  dialog.returnValue='';
  return new Promise(resolve=>{confirmPending={resolve,puzzle,revision};dialog.showModal();});
 }
@@ -28,7 +29,25 @@ $('confirm-dialog').addEventListener('close',()=>{
  if(accepted&&!current)notify('The workspace changed while you were reviewing this action. Please try again.');
  pending.resolve(accepted&&current);
 });
-async function api(path,body,method){const response=await fetch(path,{method:method||(body?'POST':'GET'),headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});const result=await response.json();if(!response.ok){if(response.status===401&&result.signIn&&session.mode!=='signed-out')applySession({...session,mode:'signed-out'});throw new Error(result.error||'Request failed');}return result;}
+// Image import and recognition run behind a modal progress dialog, so nothing
+// else can change the workspace while they work. Cancel (or Escape) aborts
+// the request; the task then stops at its next step.
+let busyTask=null;
+function startBusyTask(title,cancelLabel){
+ const controller=new AbortController();
+ const task={signal:controller.signal,
+  get cancelled(){return controller.signal.aborted;},
+  step(message){if(busyTask===task)$('busy-message').textContent=message;},
+  cancel(){if(task.cancelled)return;controller.abort();task.finish();},
+  finish(){if(busyTask!==task)return;busyTask=null;if($('busy-dialog').open)$('busy-dialog').close();}};
+ busyTask?.cancel();busyTask=task;
+ $('busy-title').textContent=title;$('busy-message').textContent='';$('busy-cancel').textContent=cancelLabel;
+ $('busy-dialog').showModal();
+ return task;
+}
+$('busy-cancel').onclick=()=>busyTask?.cancel();
+$('busy-dialog').addEventListener('close',()=>{if(!$('busy-dialog').open)busyTask?.cancel();});
+async function api(path,body,method,signal){const response=await fetch(path,{method:method||(body?'POST':'GET'),headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,signal});const result=await response.json();if(!response.ok){if(response.status===401&&result.signIn&&session.mode!=='signed-out')applySession({...session,mode:'signed-out'});throw new Error(result.error||'Request failed');}return result;}
 // Access level from the server. Guests keep their work in this browser; user
 // mode (shared password) saves puzzles and dictionaries on the server.
 let session={mode:'local'},modeView=PuzzleState.workspaceModeView(session),healthLoaded=false,afterSignIn=null;
@@ -470,7 +489,7 @@ function renderEditMode(){
 $('cell-clue').onchange=()=>{numericEntry=null;const c=puzzle.cells[selected];c.clue=$('cell-clue').checked;c.black=c.clue;if(c.black)c.highlight=false;c.number='';c.letter='';c.guess='';c.mappingAnchor=false;delete c.numberReview;invalidate();render();};$('cell-black').onchange=toggleBlack;$('cell-highlight').onchange=()=>{if(!editMode)return;const c=puzzle.cells[selected];if(c.black)return;c.highlight=$('cell-highlight').checked;render();};$('cell-number').onchange=()=>{const number=$('cell-number').value.trim();if(number&&!/^[1-9][0-9]?$/.test(number)){notify('A number must be a positive integer from 1 to 99.',true);return renderInspector();}changeNumber(selected,number);render();};$('cell-letter').onchange=()=>{const letter=normalize($('cell-letter').value.trim());if(letter&&!new RegExp(PuzzleState.nordicLetters(puzzle.language)?'^[A-ZÅÄÖ]$':'^[A-Z]$').test(letter)){notify('Enter exactly one letter from the selected language alphabet.',true);return renderInspector();}editLetter(letter);render();};for(const[id,key]of Object.entries(flags))$(id).onchange=()=>{puzzle.cells[selected][key]=$(id).checked;invalidate();render();};$('accept-all').onclick=()=>accept(puzzle.cells.map((_,i)=>i));$('accept-deductions').onclick=()=>{const candidates=puzzle.cells.map((_,i)=>i).filter(i=>puzzle.suggestions?.forcedLetters?.[i]);accept(candidates);};$('alternatives').onchange=()=>{clearCandidateResults();solutionIndex=Number($('alternatives').value);render();};
 const solveJob=PuzzleState.solveRunner({
  request:api,
- onBusy:busy=>{for(const id of ['solve','solve-grid']){$(id).disabled=busy;$(id).textContent=busy?'Finding possibilities…':'Solve puzzle →';}$('cancel-solve').hidden=!busy;$('cancel-solve').disabled=false;$('cancel-solve').textContent='Cancel search';},
+ onBusy:busy=>{for(const id of ['solve','solve-grid']){$(id).disabled=busy;$(id).textContent=busy?'Finding possibilities…':'Solve puzzle →';}$('cancel-solve').hidden=!busy;$('cancel-solve').disabled=false;$('cancel-solve').textContent='Cancel search';if(!busy&&stopSearchPrompt)$('confirm-dialog').close('cancel');},
  onStopping:stopping=>{$('cancel-solve').disabled=stopping;$('cancel-solve').textContent=stopping?'Stopping…':'Cancel search';if(stopping)$('solve-status').textContent='Stopping search and keeping its best provisional result…';},
  onUpdate:(state,stopping)=>{
   if(state.status==='running'||state.status==='queued'){const preview=state.progress?.preview;$('solve-status').textContent=PuzzleState.solveProgressText(state.progress,stopping)+(preview?' · the grid shows the best unverified guess so far':'');const margins=state.progress?.previewMargins||null;if(Array.isArray(preview)&&preview.length===puzzle.cells.length&&(preview.join()!==livePreview?.join()||JSON.stringify(margins)!==JSON.stringify(livePreviewMargins))){livePreview=preview;livePreviewMargins=margins;renderGrid();}return;}
@@ -491,6 +510,47 @@ const solveJob=PuzzleState.solveRunner({
 });
 $('solve').onclick=()=>{acceptanceHistory.clear();$('undo-acceptance').disabled=true;clearCandidateResults();renderCandidatePanel();$('solve-status').textContent='Starting local search…';const {generated,...snapshot}=JSON.parse(JSON.stringify(puzzle));void solveJob.start(snapshot);};
 $('solve-grid').onclick=()=>$('solve').click();
+// Any change to the puzzle cancels a running search. While one runs, an input
+// that would change the puzzle asks first; if the user stops the search, the
+// input is then carried out. Safe controls never ask: they only view, zoom,
+// explain, look up, save or export, or edit text that is applied separately.
+const SEARCH_SAFE=['.help-button','[data-close]','#cancel-solve','#load','#saved-language','#saved-list .icon-button','#rename-dialog','#print-open','#print-dialog','#export','#save','#dictionary','#dictionary-query','#dictionary-filter','#dictionary-search','#dictionary-results-previous','#dictionary-results-next','#dictionary-previous','#dictionary-next','#dictionary-add-words','#dictionary-words','#dictionary-file','#signin-dialog','#confirm-dialog','#busy-dialog','#pdf-dialog','#letter-conflict-keep','#assign-number-letter','#assign-number-status','#name','#rows','#cols','#generate-starters','#check-answers','#opacity','#straighten-photo','#straighten-detect','#straighten-cancel','#straighten-overlay','#edit-tool','#puzzle-tool','#zoom-out','#zoom-range','#zoom-in','#fit-puzzle','#fit-height','#fit-width','#number-position','#show-certainty','#add-current-word','#clear-candidate-selection','#find-candidates','#candidate-panel .icon-button','#lookup-query','#lookup-current','#lookup-clear','#lookup-run','#lookup-mappings','#alternatives','#solved-word-filter','#solved-word-sort','#retry-word-checks','.word-jump','#rule-out-letter'].join(',');
+let stopSearchPrompt=false,replayingInput=false;
+function controlKind(control){
+ if(control.matches('select'))return 'select';
+ if(control.matches('textarea'))return 'text';
+ if(control.matches('input'))return ['checkbox','radio','file','button','submit'].includes(control.type)?'button':['number','range'].includes(control.type)?control.type:'text';
+ if(control.matches('button'))return 'button';
+ return control.draggable?'drag':'other';
+}
+function replayInput(event,control){
+ replayingInput=true;
+ try{
+  if(event.type==='click')control.click();
+  else if(event.type==='keydown'&&control.closest('#grid')){const cell=$('grid').children[selected];cell?.focus();cell?.dispatchEvent(new KeyboardEvent('keydown',{key:event.key,code:event.code,shiftKey:event.shiftKey,bubbles:true,cancelable:true}));}
+  else{
+   control.focus();
+   if(event.type==='beforeinput'&&event.inputType==='insertText'&&event.data)try{control.setRangeText(event.data,control.selectionStart,control.selectionEnd,'end');control.dispatchEvent(new Event('input',{bubbles:true}));}catch{}
+   if(event.type==='mousedown'&&control.matches('select'))try{control.showPicker();}catch{}
+  }
+ }finally{replayingInput=false;}
+}
+async function confirmStopSearch(event,control){
+ stopSearchPrompt=true;
+ const stop=await confirmAction('A search is running. This change would stop it and discard its unfinished results.','Stop the search?',{confirm:'Stop search and continue',cancel:'Keep searching'});
+ stopSearchPrompt=false;
+ if(!stop||!solveJob.running)return;
+ solveJob.cancel();$('solve-status').textContent='Search stopped before it finished. Its unfinished results were discarded.';
+ if(livePreview){livePreview=null;livePreviewMargins=null;renderGrid();}
+ replayInput(event,control);
+}
+for(const type of ['click','mousedown','keydown','beforeinput','dragstart'])document.addEventListener(type,event=>{
+ if(replayingInput||!solveJob.running||!(event.target instanceof Element))return;
+ const control=event.target.closest('button,input,select,textarea,[draggable="true"]');if(!control)return;
+ if(!PuzzleState.searchInterruption({type,key:event.key,kind:controlKind(control),safe:!!control.closest(SEARCH_SAFE),grid:!!control.closest('#grid'),modifier:event.ctrlKey||event.metaKey||event.altKey}))return;
+ event.preventDefault();event.stopImmediatePropagation();
+ if(!stopSearchPrompt)void confirmStopSearch(event,control);
+},true);
 // Generating fills the drawn grid on the server and opens the result in
 // Puzzle mode. The answer stays out of the grid; it is used only by Check my
 // letters and the solution sheet.
@@ -661,35 +721,46 @@ function choosePdfPage(pages){
 let imageToken=0,straightenHandles=null,straightenBusy=false;
 $('image-upload').onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();$('image').click();}};
 $('image').onchange=protect(async event=>{
- const file=event.target.files[0];event.target.value='';if(!file)return;const version=revision,token=++imageToken;
+ const file=event.target.files[0];event.target.value='';if(!file)return;
  const isPdf=file.type==='application/pdf'||/\.pdf$/i.test(file.name);
  if(!isPdf&&!['image/png','image/jpeg','image/webp'].includes(file.type))throw new Error('Choose a PDF, PNG, JPEG, or WebP file.');
  if(file.size>8*1024*1024)throw new Error('File is too large (maximum 8 MB).');
- let data=await fileData(file);
- if(isPdf){
-  data='data:application/pdf;base64,'+data.split(',')[1];
-  notify('Reading PDF locally…');const info=await api('/api/pdf',{pdf:data});
-  if(token!==imageToken||version!==revision)return;
-  const page=info.pages===1?1:await choosePdfPage(info.pages);if(page===null){notify('PDF import cancelled.');return;}
-  if(token!==imageToken||version!==revision)return;
-  notify(`Rendering PDF page ${page} locally…`);const rendered=await api('/api/pdf',{pdf:data,page});data=rendered.image;
- }
- const decoded=new Image();decoded.src=data;
- try{await decoded.decode();}catch{throw new Error('The file is not a readable image. The current image was kept.');}
- if(!decoded.naturalWidth||!decoded.naturalHeight||decoded.naturalWidth*decoded.naturalHeight>16000000)throw new Error('Images must contain at most 16 million pixels.');
- if(token!==imageToken||version!==revision)return notify('The workspace changed while loading the image. Add it again.');
- if((puzzle.image||puzzle.cells.some(c=>c.black||c.number||c.letter||c.guess))&&!await confirmAction('Import this screenshot as a fresh grid? Save first to keep the current puzzle.'))return;
- if(token!==imageToken)return;
- const next=fresh(puzzle.rows,puzzle.cols,puzzle.language);Object.assign(next,{name:puzzle.name,rules:puzzle.rules,useDictionary:puzzle.useDictionary,image:data,imageBounds:{x:0,y:0,width:1,height:1}});
- setPuzzle(next);const importedPuzzle=puzzle,recognitionVersion=revision;$('ocr').disabled=true;
- notify('Image loaded. Detecting grid dimensions, blocked cells, and numbers locally…');
+ const version=revision,token=++imageToken,task=startBusyTask(isPdf?'Importing PDF':'Importing image','Cancel import');
+ let importedPuzzle=null;
+ const stale=()=>{if(task.cancelled)return true;if(token===imageToken&&version===revision)return false;task.finish();notify('The workspace changed while loading the image. Add it again.');return true;};
  try{
-  const result=await api('/api/ocr',{image:data,autoDetect:true});
-  if(token!==imageToken||puzzle!==importedPuzzle||revision!==recognitionVersion)return notify('The workspace changed during recognition. The latest edits were kept; recognize again when ready.');
-  puzzle.rows=result.rows;puzzle.cols=result.cols;puzzle.cells=result.cells.map(c=>({...c,prefilled:!!c.letter}));puzzle.imageBounds=result.bounds||result.imageBounds||puzzle.imageBounds;
-  invalidate();syncControls();render();notify(['Image imported. Review recognized cells before solving.',...(result.diagnostics||[])].join(' '));
- }catch(error){if(puzzle===importedPuzzle)notify('Image kept. Automatic recognition failed: '+error.message+' For a photo taken at an angle or of a curved page, use Straighten photo. Otherwise set rows, columns and image bounds, then apply dimensions and recognize again.',true);}
- finally{if(token===imageToken)$('ocr').disabled=false;}
+  task.step('Reading the file…');
+  let data=await fileData(file);if(stale())return;
+  if(isPdf){
+   data='data:application/pdf;base64,'+data.split(',')[1];
+   task.step('Reading the PDF locally…');const info=await api('/api/pdf',{pdf:data},undefined,task.signal);
+   if(stale())return;
+   const page=info.pages===1?1:await choosePdfPage(info.pages);if(page===null){task.finish();notify('PDF import cancelled.');return;}
+   if(stale())return;
+   task.step(`Rendering PDF page ${page} locally…`);const rendered=await api('/api/pdf',{pdf:data,page},undefined,task.signal);data=rendered.image;
+  }
+  task.step('Decoding the image…');
+  const decoded=new Image();decoded.src=data;
+  try{await decoded.decode();}catch{throw new Error('The file is not a readable image. The current image was kept.');}
+  if(!decoded.naturalWidth||!decoded.naturalHeight||decoded.naturalWidth*decoded.naturalHeight>16000000)throw new Error('Images must contain at most 16 million pixels.');
+  if(stale())return;
+  if((puzzle.image||puzzle.cells.some(c=>c.black||c.number||c.letter||c.guess))&&!await confirmAction('Import this screenshot as a fresh grid? Save first to keep the current puzzle.')){task.finish();return;}
+  if(task.cancelled||token!==imageToken)return;
+  const next=fresh(puzzle.rows,puzzle.cols,puzzle.language);Object.assign(next,{name:puzzle.name,rules:puzzle.rules,useDictionary:puzzle.useDictionary,image:data,imageBounds:{x:0,y:0,width:1,height:1}});
+  setPuzzle(next);importedPuzzle=puzzle;const recognitionVersion=revision;
+  task.step('Detecting grid dimensions, blocked cells and numbers locally…');
+  try{
+   const result=await api('/api/ocr',{image:data,autoDetect:true},undefined,task.signal);
+   if(task.cancelled)return;
+   if(token!==imageToken||puzzle!==importedPuzzle||revision!==recognitionVersion){task.finish();return notify('The workspace changed during recognition. The latest edits were kept; recognize again when ready.');}
+   puzzle.rows=result.rows;puzzle.cols=result.cols;puzzle.cells=result.cells.map(c=>({...c,prefilled:!!c.letter}));puzzle.imageBounds=result.bounds||result.imageBounds||puzzle.imageBounds;
+   invalidate();syncControls();render();task.finish();notify(['Image imported. Review recognized cells before solving.',...(result.diagnostics||[])].join(' '));
+  }catch(error){if(!task.cancelled&&puzzle===importedPuzzle){task.finish();notify('Image kept. Automatic recognition failed: '+error.message+' For a photo taken at an angle or of a curved page, use Straighten photo. Otherwise set rows, columns and image bounds, then apply dimensions and recognize again.',true);}}
+ }catch(error){if(!task.cancelled)throw error;}
+ finally{
+  task.finish();
+  if(task.cancelled)notify(importedPuzzle&&puzzle===importedPuzzle?'Recognition cancelled. The image was kept on an empty grid; set rows, columns and image bounds, then recognize when ready.':'Import cancelled. The current puzzle was not changed.');
+ }
 });
 $('apply-image-dimensions').onclick=async()=>{const rows=Number($('rows').value),cols=Number($('cols').value);if(!Number.isInteger(rows)||!Number.isInteger(cols)||rows<1||rows>40||cols<1||cols>40)return notify('Use whole-number dimensions between 1 and 40.',true);if(puzzle.cells.some(c=>c.number||c.letter||c.guess||c.black)&&!await confirmAction('Apply these dimensions and clear grid entries? The image and alignment will be kept.'))return;puzzle.rows=rows;puzzle.cols=cols;puzzle.cells=fresh(rows,cols).cells;selected=0;numericEntry=null;invalidate();render();};
 
@@ -699,7 +770,7 @@ $('apply-alignment').onclick=()=>{
  try{const bounds=PuzzleState.imageBoundsFromPercent(values);puzzle.imageBounds=bounds;alignmentDirty=false;solveJob.cancel();revision++;renderGrid();$('alignment-status').textContent='Alignment applied.';}
  catch(error){$('alignment-status').textContent=error.message;}
 };
-$('opacity').oninput=()=>document.documentElement.style.setProperty('--overlay',$('opacity').value/100);$('remove-image').onclick=()=>{delete puzzle.image;delete puzzle.imageBounds;delete puzzle.straightenedPhoto;solveJob.cancel();revision++;render();};$('ocr').onclick=protect(async()=>{if(alignmentDirty)throw new Error('Apply the alignment changes before recognizing the grid.');if(!ocrAvailable)throw new Error('Local OCR is unavailable. You can still enter cells manually over the image.');if(puzzle.cells.some(c=>c.number||c.letter||c.guess||c.black)&&!await confirmAction('Recognition replaces the current grid entries. Continue?'))return;const version=revision;$('ocr').disabled=true;try{const result=await api('/api/ocr',{image:puzzle.image,rows:puzzle.rows,cols:puzzle.cols,bounds:puzzle.imageBounds,photo:!!puzzle.straightenedPhoto});if(version!==revision)return notify('The puzzle changed during recognition. Run recognition again.');puzzle.cells=result.cells.map(c=>({...c,prefilled:!!c.letter}));invalidate();render();notify(['Recognition complete. Review all cells before solving.',...result.diagnostics].join(' '));}finally{$('ocr').disabled=false;}});
+$('opacity').oninput=()=>document.documentElement.style.setProperty('--overlay',$('opacity').value/100);$('remove-image').onclick=()=>{delete puzzle.image;delete puzzle.imageBounds;delete puzzle.straightenedPhoto;solveJob.cancel();revision++;render();};$('ocr').onclick=protect(async()=>{if(alignmentDirty)throw new Error('Apply the alignment changes before recognizing the grid.');if(!ocrAvailable)throw new Error('Local OCR is unavailable. You can still enter cells manually over the image.');if(puzzle.cells.some(c=>c.number||c.letter||c.guess||c.black)&&!await confirmAction('Recognition replaces the current grid entries. Continue?'))return;const version=revision,task=startBusyTask('Recognizing the grid','Cancel recognition');task.step('Detecting blocked cells and reading numbers locally…');try{const result=await api('/api/ocr',{image:puzzle.image,rows:puzzle.rows,cols:puzzle.cols,bounds:puzzle.imageBounds,photo:!!puzzle.straightenedPhoto},undefined,task.signal);if(task.cancelled)return;task.finish();if(version!==revision)return notify('The puzzle changed during recognition. Run recognition again.');puzzle.cells=result.cells.map(c=>({...c,prefilled:!!c.letter}));invalidate();render();notify(['Recognition complete. Review all cells before solving.',...result.diagnostics].join(' '));}catch(error){if(!task.cancelled)throw error;}finally{task.finish();if(task.cancelled)notify('Recognition cancelled. The grid was not changed.');}});
 let dictionaryPages=PuzzleState.dictionaryPages(),dictionaryPage=0,dictionaryBusy=false;
 function renderDictionaryPage(){
  $('dictionary-words').value=dictionaryPages.page(dictionaryPage);
@@ -835,23 +906,31 @@ $('straighten-cancel').onclick=()=>{straightenHandles=null;renderStraighten();};
 $('straighten-apply').onclick=protect(async()=>{
  if(!straightenHandles||straightenBusy)return;
  if(puzzle.cells.some(c=>c.number||c.letter||c.guess||c.black)&&!await confirmAction('Straightening replaces the image and reads the grid again. Current grid entries are replaced. Continue?'))return;
- const target=puzzle,version=revision,handles=straightenHandles;straightenBusy=true;renderStraighten();
- notify('Straightening the photo and evening out its cells locally…');
+ const target=puzzle,version=revision,handles=straightenHandles,task=startBusyTask('Straightening the photo','Cancel');straightenBusy=true;renderStraighten();
+ task.step('Straightening the photo and evening out its cells locally…');
+ let straightened=false;
  try{
-  const flat=await api('/api/straighten',{image:puzzle.image,handles});
-  if(puzzle!==target||revision!==version)return notify('The puzzle changed while straightening. Try again.');
+  const flat=await api('/api/straighten',{image:puzzle.image,handles},undefined,task.signal);
+  if(task.cancelled)return;
+  if(puzzle!==target||revision!==version){task.finish();return notify('The puzzle changed while straightening. Try again.');}
   straightenHandles=null;solveJob.cancel();
   Object.assign(puzzle,{image:flat.image,straightenedPhoto:true,imageBounds:flat.bounds||{x:0,y:0,width:1,height:1}});
   if(flat.rows){puzzle.rows=flat.rows;puzzle.cols=flat.cols;}
   puzzle.cells=fresh(puzzle.rows,puzzle.cols).cells;selected=0;numericEntry=null;invalidate();syncControls();render();
-  const recognitionVersion=revision;
+  straightened=true;const recognitionVersion=revision;
+  task.step('Reading the grid from the straightened photo…');
   try{
-   const result=await api('/api/ocr',flat.rows?{image:flat.image,rows:flat.rows,cols:flat.cols,bounds:flat.bounds,photo:true}:{image:flat.image,autoDetect:true,photo:true});
+   const result=await api('/api/ocr',flat.rows?{image:flat.image,rows:flat.rows,cols:flat.cols,bounds:flat.bounds,photo:true}:{image:flat.image,autoDetect:true,photo:true},undefined,task.signal);
+   if(task.cancelled)return;task.finish();
    if(puzzle!==target||revision!==recognitionVersion)return notify('The puzzle changed during recognition. Read the grid from the image again when ready.');
    puzzle.rows=result.rows;puzzle.cols=result.cols;puzzle.imageBounds=result.bounds||puzzle.imageBounds;puzzle.cells=result.cells.map(c=>({...c,prefilled:!!c.letter}));
    invalidate();syncControls();render();notify(['Photo straightened. Review recognized cells before solving.',...(result.diagnostics||[])].join(' '));
-  }catch(error){notify('Photo straightened, but the grid could not be read: '+error.message+' Set rows and columns, apply them to the image, then read the grid again.',true);}
- }finally{straightenBusy=false;renderStraighten();}
+  }catch(error){if(!task.cancelled){task.finish();notify('Photo straightened, but the grid could not be read: '+error.message+' Set rows and columns, apply them to the image, then read the grid again.',true);}}
+ }catch(error){if(!task.cancelled)throw error;}
+ finally{
+  task.finish();straightenBusy=false;renderStraighten();
+  if(task.cancelled)notify(straightened?'Photo straightened; reading the grid was cancelled. Set rows and columns, apply them to the image, then read the grid again.':'Straightening cancelled. The photo and grid were not changed.');
+ }
 });
 // Autosave: one recovery copy of the workspace, so a reload or closed tab
 // never loses work. The local app keeps it on the server; hosted mode keeps

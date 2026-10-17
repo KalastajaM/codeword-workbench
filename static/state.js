@@ -421,7 +421,22 @@ function solveRunner({request,path='/api/solve-jobs',onUpdate=()=>{},onError=()=
   }catch(error){if(active===job){await stop(job);if(active===job)onError(error);}}
   finally{if(active===job){active=null;onBusy(false);}}
  }
- return {start,cancel,requestCancel};
+ return {start,cancel,requestCancel,get running(){return !!active;}};
+}
+// While a search runs, any change to the puzzle cancels it, so such an input
+// asks first. kind: button (including checkboxes and file inputs), select,
+// text, number, range, drag or other.
+// Inputs on safe controls (viewing, zooming, help, lookups) and moving around
+// the grid never ask; typing into the grid does.
+function searchInterruption({type,key='',kind,safe=false,grid=false,modifier=false}){
+ if(safe)return false;
+ if(grid)return type==='keydown'&&!modifier&&(key.length===1||key==='Backspace'||key==='Delete');
+ if(type==='dragstart')return true;
+ if(type==='click')return kind==='button';
+ if(type==='mousedown')return kind==='select'||kind==='number';
+ if(type==='beforeinput')return kind==='text'||kind==='number';
+ if(type==='keydown')return kind==='select'&&!['Tab','Escape','Shift','Control','Alt','Meta'].includes(key)||kind==='number'&&(key==='ArrowUp'||key==='ArrowDown');
+ return false;
 }
 // A generated puzzle keeps its answer, letters per cell, for checking and
 // printing only. It applies while the black cells and numbers are unchanged.
@@ -540,5 +555,5 @@ function solveProgressText(progress,stopping){
  if(PREPARATION_STAGES.has(stage))return `Preparing: ${stage==='preparing'?'loading puzzle and dictionary':stage.replaceAll('_',' ')} · ${seconds} · search time starts after this`;
  return `${stage.replaceAll('_',' ')} · ${Number(p.nodes||0).toLocaleString()} search nodes · ${seconds} · ${Number(p.solutionsFound||0)} suggestions found`;
 }
-const helpers={generatedAnswer,answerCheck,answerCheckText,letterCertainty,savedPuzzleView,renumberCell,workspaceModeView,visibleRuledOut,numberIsOpen,canonicalEliminations,ruledOutLetters,setRuledOut,slotIdentity,rejectedWordsFor,setWordRejected,eliminationSuggestionGroups,wordAssessmentQueue,assessedWord,assessedWordLabel,displayedPuzzleWords,solvedWordActions,solvedWordEvidence,solvedWordsView,solvedWordSelection,solvedWordPatternScore,mappingCyclePlan,numberMovePlan,clearMappingProvenance,numberRemovalPlan,numberAssignmentPlan,dictionaryInputWords,dictionarySearchSummary,nordicLetters,completeWordText,selectedWordCheckText,patternScoreText,candidateEvidenceText,wordLookupText,lookupPattern,dictionaryPages,languagePresentation,dictionaryEditor,cellWord,letterOwners,moveLetterAssignment,resetSuggestions,editConfirmedLetter,cancelledResult,solveProgressText,solveStopExplanation,hasSolveProgress,mappingLetterInfo,changeMappingLetter,resetProgress,suggestionLabel,restoredWords,wordEvidenceLabel,plausibilityLabel,plausibilityDetail,candidateDisplay,solveRunner,canonicalPuzzle,slots,candidateLetters,matchesSlot,blankCell,numberEntry,imageBoundsFromPercent,fitScale,suggestedLetter,mappingDeductions,solveSummary,refreshDeductions,confirmCells,unconfirmCells,numberCells,undoConfirmation,acceptanceHistory,wordChoices,candidateSelection,candidateSearchPuzzle};if(typeof module!=='undefined'&&module.exports)module.exports=helpers;else root.PuzzleState=helpers;
+const helpers={generatedAnswer,answerCheck,answerCheckText,letterCertainty,savedPuzzleView,renumberCell,workspaceModeView,visibleRuledOut,numberIsOpen,canonicalEliminations,ruledOutLetters,setRuledOut,slotIdentity,rejectedWordsFor,setWordRejected,eliminationSuggestionGroups,wordAssessmentQueue,assessedWord,assessedWordLabel,displayedPuzzleWords,solvedWordActions,solvedWordEvidence,solvedWordsView,solvedWordSelection,solvedWordPatternScore,mappingCyclePlan,numberMovePlan,clearMappingProvenance,numberRemovalPlan,numberAssignmentPlan,dictionaryInputWords,dictionarySearchSummary,nordicLetters,completeWordText,selectedWordCheckText,patternScoreText,candidateEvidenceText,wordLookupText,lookupPattern,dictionaryPages,languagePresentation,dictionaryEditor,cellWord,letterOwners,moveLetterAssignment,resetSuggestions,editConfirmedLetter,cancelledResult,searchInterruption,solveProgressText,solveStopExplanation,hasSolveProgress,mappingLetterInfo,changeMappingLetter,resetProgress,suggestionLabel,restoredWords,wordEvidenceLabel,plausibilityLabel,plausibilityDetail,candidateDisplay,solveRunner,canonicalPuzzle,slots,candidateLetters,matchesSlot,blankCell,numberEntry,imageBoundsFromPercent,fitScale,suggestedLetter,mappingDeductions,solveSummary,refreshDeductions,confirmCells,unconfirmCells,numberCells,undoConfirmation,acceptanceHistory,wordChoices,candidateSelection,candidateSearchPuzzle};if(typeof module!=='undefined'&&module.exports)module.exports=helpers;else root.PuzzleState=helpers;
 })(typeof globalThis!=='undefined'?globalThis:this);

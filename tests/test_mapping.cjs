@@ -47,7 +47,7 @@ test('Grid Solve forwards the original action and both buttons share solver busy
  const vm=require('node:vm'),fs=require('node:fs'),source=fs.readFileSync(require.resolve('../static/app.js'),'utf8');
  const nodes={},$=id=>nodes[id]??={disabled:false,textContent:'',click(){if(!this.disabled)this.onclick?.();}};let calls=0;$('solve').onclick=()=>calls++;
  vm.runInNewContext(source.match(/\$\('solve-grid'\)\.onclick=.*?;/)[0],{$});$('solve-grid').click();assert.equal(calls,1);
- const busyCode=source.match(/onBusy:busy=>(.*),\n onStopping:/)[1];const busy=vm.runInNewContext('(busy=>'+busyCode+')',{$});busy(true);
+ const busyCode=source.match(/onBusy:busy=>(.*),\n onStopping:/)[1];const busy=vm.runInNewContext('(busy=>'+busyCode+')',{$,stopSearchPrompt:false});busy(true);
  assert.equal($('solve').disabled,true);assert.equal($('solve-grid').disabled,true);assert.equal($('solve-grid').textContent,$('solve').textContent);$('solve-grid').click();assert.equal(calls,1);
  busy(false);$('solve-grid').click();assert.equal(calls,2);
 });
