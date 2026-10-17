@@ -60,6 +60,8 @@ Keyboard controls: arrow keys select cells; digits enter a number and letters en
 
 Use **Fit puzzle** to fit both dimensions, **Fit height** to fill the available height, or **Fit width** to fill the available width. The single-dimension modes allow scrolling in the other direction. Use the zoom buttons/slider to enlarge details. Zoom changes only the view; image alignment and puzzle contents stay the same.
 
+The toolbar above the grid holds **Solve puzzle**, **Undo**, **Reset suggestions** and **Reset puzzle**. It stays at the top of the screen while you scroll through a tall puzzle. **Reset suggestions** clears provisional suggestions, pencil marks, search results and undo history but keeps confirmed letters. **Reset puzzle** also clears answer letters, ruled-out letters and rejected words; in Puzzle mode it keeps prefilled letters. Neither reset changes a saved puzzle until you save.
+
 ## Edit and Puzzle modes
 
 Use **Edit** for number/letter entry, Space or the Black / unusable checkbox, and grid alignment corrections. **Puzzle** allows answer-letter entry and deletion, but locks numbers, black cells, prefilled letters, dimensions, boundary controls and image alignment. Letters entered in Edit mode are marked as prefilled; player answers retain their editable status across save/open. Selection, zoom, solving and explicit confirmation/status actions remain available. Switch back to Edit to correct the grid.
@@ -128,7 +130,7 @@ Use **Confirm** to turn a provisional letter into a fixed constraint. **Unconfir
 
 To correct a misread number after solving, change it in Edit mode. The suggestions stay: in each one the cell takes the letter that suggestion gives the new number elsewhere in the grid, or stays empty if the number appears nowhere else. The cell's own letter belonged to the old number and is cleared, also when it was entered in Edit mode, so one letter never ends up on two numbers; if a printed letter was the correct one, type it again after fixing the number. If the new number already has a confirmed letter, the cell shows it as a mapping deduction for you to confirm. Suggestions that contradict confirmed letters are dropped. Solve again to check the adjusted suggestions. Other changes to the grid still clear the suggestions.
 
-With one letter per number, deleting a letter from a cell whose number shows that letter in other cells removes it from the whole number, after you confirm; **Undo** under the grid restores it. Otherwise the other cells would keep showing the letter.
+With one letter per number, deleting a letter from a cell whose number shows that letter in other cells removes it from the whole number, after you confirm; **Undo** in the puzzle toolbar restores it. Otherwise the other cells would keep showing the letter.
 
 **Undo last confirmation** restores the previous acceptance state, including a bulk acceptance. This history is limited to the current session and is cleared by unrelated constraint edits, loading another puzzle or running a new search. Unconfirming is available for letters entered manually as well. Mapping deduction is computed automatically from the remaining confirmed letters.
 
