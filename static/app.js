@@ -111,28 +111,42 @@ function stopReplayTimer(){if(replayTimer){clearInterval(replayTimer);replayTime
 function exitReplay(){stopReplayTimer();if(replayIndex===null)return;replayIndex=null;livePreview=null;livePreviewMargins=null;renderGrid();}
 // Score (dictionary-free) or filled cells (dictionary) per replay step: a
 // single teal line, the current step marked; hover reads a step, click jumps.
+// On the showcase, whose answer is known, a second chart below counts the
+// cells each step has right, on a 0-to-all scale.
 const SVG_NS='http://www.w3.org/2000/svg';
-function replayValues(){const dictionary=replay.some(f=>f.kind);return {dictionary,values:replay.map(f=>dictionary?f.letters.filter(Boolean).length:f.score)};}
+function replayValues(){
+ const dictionary=replay.some(f=>f.kind),checks=replay.map(f=>Samples.compareWithSample(puzzle,f.letters));
+ return {dictionary,values:replay.map(f=>dictionary?f.letters.filter(Boolean).length:f.score),
+  right:checks.every(Boolean)?checks.map(c=>c.correct):null,total:checks[0]?.total};
+}
 function replayChartLabel(k){
- const {dictionary,values}=replayValues();
- if(k===null)return dictionary?`Cells filled: ${values[0]} → ${values[values.length-1]}`:`Pattern score: ${values[0].toFixed(0)} → ${values[values.length-1].toFixed(0)}`;
- return `Step ${k+1}: ${dictionary?values[k]+' cells filled':'score '+values[k].toFixed(1)}`;
+ const {dictionary,values,right,total}=replayValues(),last=values.length-1;
+ if(k===null)return (dictionary?`Cells filled: ${values[0]} → ${values[last]}`:`Pattern score: ${values[0].toFixed(0)} → ${values[last].toFixed(0)}`)
+  +(right?` · cells right: ${right[0]} → ${right[last]} of ${total}`:'');
+ return `Step ${k+1}: ${dictionary?values[k]+' cells filled':'score '+values[k].toFixed(1)}`+(right?` · ${right[k]} of ${total} cells right`:'');
 }
 function renderReplayChart(){
- const svg=$('replay-chart');[...svg.querySelectorAll(':not(title)')].forEach(e=>e.remove());
+ const charts=[$('replay-chart'),$('replay-chart-right')];
+ charts.forEach(svg=>[...svg.querySelectorAll(':not(title)')].forEach(e=>e.remove()));
  if(!replay)return;
- const {dictionary,values}=replayValues(),W=240,H=56,P=6,n=values.length;
+ const {dictionary,values,right,total}=replayValues(),W=240,H=56,P=6,n=values.length,k=replayIndex??n-1;
  $('replay-chart-title').textContent=(dictionary?'Cells filled':'Pattern score')+' per replay step';
- const min=Math.min(...values),max=Math.max(...values),x=i=>P+i*(W-2*P)/Math.max(1,n-1),y=v=>H-P-(v-min)/((max-min)||1)*(H-2*P);
- const el=(tag,attrs)=>{const e=document.createElementNS(SVG_NS,tag);for(const[k,v]of Object.entries(attrs))e.setAttribute(k,v);svg.append(e);return e;};
- el('line',{x1:P,x2:W-P,y1:H-P,y2:H-P,class:'replay-chart-axis'});
- el('path',{d:values.map((v,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(''),class:'replay-chart-line'});
- const guide=el('line',{x1:0,x2:0,y1:P,y2:H-P,class:'replay-chart-guide',visibility:'hidden'});
- const k=replayIndex??n-1;el('circle',{cx:x(k),cy:y(values[k]),r:4,class:'replay-chart-point'});
- const nearest=event=>{const box=svg.getBoundingClientRect();return Math.max(0,Math.min(n-1,Math.round(((event.clientX-box.left)/box.width*W-P)/((W-2*P)/Math.max(1,n-1)))));};
- svg.onpointermove=event=>{const i=nearest(event);guide.setAttribute('x1',x(i));guide.setAttribute('x2',x(i));guide.setAttribute('visibility','visible');$('replay-chart-label').textContent=replayChartLabel(i);};
- svg.onpointerleave=()=>{guide.setAttribute('visibility','hidden');$('replay-chart-label').textContent=replayChartLabel(replayIndex);};
- svg.onclick=event=>{stopReplayTimer();showReplayStep(nearest(event));};
+ charts[1].toggleAttribute('hidden',!right);
+ const x=i=>P+i*(W-2*P)/Math.max(1,n-1),guides=[];
+ const nearest=(svg,event)=>{const box=svg.getBoundingClientRect();return Math.max(0,Math.min(n-1,Math.round(((event.clientX-box.left)/box.width*W-P)/((W-2*P)/Math.max(1,n-1)))));};
+ const draw=(svg,series,min,max)=>{
+  const y=v=>H-P-(v-min)/((max-min)||1)*(H-2*P);
+  const el=(tag,attrs)=>{const e=document.createElementNS(SVG_NS,tag);for(const[a,v]of Object.entries(attrs))e.setAttribute(a,v);svg.append(e);return e;};
+  el('line',{x1:P,x2:W-P,y1:H-P,y2:H-P,class:'replay-chart-axis'});
+  el('path',{d:series.map((v,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(''),class:'replay-chart-line'});
+  guides.push(el('line',{x1:0,x2:0,y1:P,y2:H-P,class:'replay-chart-guide',visibility:'hidden'}));
+  el('circle',{cx:x(k),cy:y(series[k]),r:4,class:'replay-chart-point'});
+  svg.onpointermove=event=>{const i=nearest(svg,event);guides.forEach(g=>{g.setAttribute('x1',x(i));g.setAttribute('x2',x(i));g.setAttribute('visibility','visible');});$('replay-chart-label').textContent=replayChartLabel(i);};
+  svg.onpointerleave=()=>{guides.forEach(g=>g.setAttribute('visibility','hidden'));$('replay-chart-label').textContent=replayChartLabel(replayIndex);};
+  svg.onclick=event=>{stopReplayTimer();showReplayStep(nearest(svg,event));};
+ };
+ draw(charts[0],values,Math.min(...values),Math.max(...values));
+ if(right)draw(charts[1],right,0,total);
  $('replay-chart-label').textContent=replayChartLabel(replayIndex);
 }
 function renderReplay(){
