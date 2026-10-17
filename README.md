@@ -21,9 +21,10 @@ one cell, word or mapping at a time.
   installed; **Quick** search was not enough. Letters whose number could
   take another letter at almost no cost are outlined, so you know where to
   check first. The same models flag implausible words.
-- **Make your own puzzles:** draw a grid, optionally fix some numbers and
-  letters or list words to include, and generate a codeword filled from your
-  word list. Choose Easy, Medium or Hard: the app grades the puzzle by solving
+- **Make your own puzzles:** draw a grid or ask for a number of words and
+  word lengths and let the app place the black cells, optionally fix some
+  numbers and letters or list words to include, and generate a codeword
+  filled from your word list. Choose Easy, Medium or Hard: the app grades the puzzle by solving
   it step by step and gives letters until it fits, with only one answer.
   Solve it in the app with an answer check, or print it with its number key
   and solution.
@@ -111,6 +112,7 @@ in testing, so the app uses Deep when the dictionary is off.
 - `app/solver.py`: validation and bounded constraint search.
 - `app/dictionaries.py`: demonstration and custom vocabularies.
 - `app/generator.py`: fills a drawn grid from the dictionary and numbers it.
+- `app/grid_layout.py`: places black cells for a target number of words.
 - `app/language_model.py`: character models, soft spelling rules and pattern
   checks; `app/models/` holds the bundled counts.
 - `app/ocr.py`, `app/number_reader.py`, `app/straighten.py`: image

@@ -118,7 +118,7 @@ function renderReplay(){
 function suggestion(i){if(showingPreview()&&!puzzle.cells[i]?.letter)return livePreview[i]||'';return PuzzleState.suggestedLetter(puzzle,i,solutionIndex);}
 function isDeduction(i){const forced=puzzle.suggestions?.forcedLetters?.[i];return !!forced&&suggestion(i)===forced;}
 function normalize(text){return text.normalize('NFC').toUpperCase();}
-function setPuzzle(value,editing=true){straightenHandles=null;clearLookup();if(typeof dictionaryEditor!=='undefined'){dictionaryEditor.cancel();$('dictionary-dialog').close();}wordDirection='Across';lastClickedCell=null;editMode=editing;clearCandidateResults(true);$('solve-status').textContent='';fitMode='width';acceptanceHistory.clear();numericEntry=null;puzzle=PuzzleState.canonicalPuzzle(value);PuzzleState.refreshDeductions(puzzle);selected=0;solutionIndex=0;solveJob.cancel();revision++;syncControls();render();validate();savedFingerprint=workspaceFingerprint();}
+function setPuzzle(value,editing=true){straightenHandles=null;layoutTarget=null;placedLayout=null;clearLookup();if(typeof dictionaryEditor!=='undefined'){dictionaryEditor.cancel();$('dictionary-dialog').close();}wordDirection='Across';lastClickedCell=null;editMode=editing;clearCandidateResults(true);$('solve-status').textContent='';fitMode='width';acceptanceHistory.clear();numericEntry=null;puzzle=PuzzleState.canonicalPuzzle(value);PuzzleState.refreshDeductions(puzzle);selected=0;solutionIndex=0;solveJob.cancel();revision++;syncControls();render();validate();savedFingerprint=workspaceFingerprint();}
 function syncControls(){$('number-position').value=puzzle.numberPosition;$('search-mode').value=puzzle.searchMode;$('allow-unknown-words').checked=puzzle.allowUnknownWords;alignmentDirty=false;$('alignment-status').textContent='';for(const key of ['name','rows','cols','language'])$(key).value=puzzle[key];$('use-dictionary').checked=puzzle.useDictionary;$('capacity').value=puzzle.rules.maxLettersPerNumber;$('forbidden').value=puzzle.rules.forbiddenPatterns.join('\n');$('discouraged').value=puzzle.rules.discouragedPatterns.join('\n');const bounds=puzzle.imageBounds||{x:0,y:0,width:1,height:1};for(const key of ['x','y','width','height'])$('bound-'+key).value=Math.round(bounds[key]*1000)/10;}
 // Any full render follows a user action or a new result: leave the replay.
 function render(){stopReplayTimer();if(replayIndex!==null){replayIndex=null;livePreview=null;livePreviewMargins=null;}renderGrid();renderStraighten();renderInspector();renderMapping();renderResults();renderCandidatePanel();renderEditMode();renderGenerated();}
@@ -584,7 +584,7 @@ const generateJob=PuzzleState.solveRunner({
  onBusy:busy=>{$('generate').disabled=busy;$('generate').textContent=busy?'Generating…':'Generate puzzle';$('cancel-generate').hidden=!busy;$('cancel-generate').disabled=false;},
  onStopping:stopping=>{$('cancel-generate').disabled=stopping;if(stopping)$('generate-status').textContent='Stopping…';},
  onUpdate:state=>{
-  if(state.status==='running'||state.status==='queued'){const p=state.progress||{};$('generate-status').textContent=p.stage==='checking'||p.stage==='grading'?`${p.stage==='grading'?'Checking the difficulty':'Checking for other answers'}… ${Math.round(p.elapsedSeconds||0)} s.`:`Filling the grid… ${Math.round(p.elapsedSeconds||0)} s, ${(p.nodes||0).toLocaleString()} words tried`+(p.restarts?`, ${p.restarts} restart${p.restarts===1?'':'s'}`:'')+'.';return;}
+  if(state.status==='running'||state.status==='queued'){const p=state.progress||{};$('generate-status').textContent=p.stage==='layout'?`Placing black cells… ${Math.round(p.elapsedSeconds||0)} s`+(p.restarts?`, layout ${p.restarts+1}`:'')+'.':p.stage==='checking'||p.stage==='grading'?`${p.stage==='grading'?'Checking the difficulty':'Checking for other answers'}… ${Math.round(p.elapsedSeconds||0)} s.`:`Filling the grid… ${Math.round(p.elapsedSeconds||0)} s, ${(p.nodes||0).toLocaleString()} words tried`+(p.restarts?`, ${p.restarts} restart${p.restarts===1?'':'s'}`:'')+'.';return;}
   if(state.status==='failed')throw new Error(state.error||'Generating failed.');
   const result=state.result||{},notes=(result.diagnostics||[]).join(' ');
   if(result.status!=='generated'){
@@ -595,7 +595,7 @@ const generateJob=PuzzleState.solveRunner({
   const source=generateSource;generateSource=null;
   if(!source||source.puzzle!==puzzle||source.revision!==revision){$('generate-status').textContent='The grid changed while generating, so the result was not applied. Generate again.';return;}
   const next=JSON.parse(JSON.stringify(puzzle));
-  next.cells=next.cells.map((cell,i)=>({...PuzzleState.blankCell(),...(cell.highlight?{highlight:true}:{}),...(cell.clue?{clue:true}:{}),...result.cells[i]}));
+  next.cells=next.cells.map((cell,i)=>({...PuzzleState.blankCell(),...(cell.highlight&&!result.cells[i].black?{highlight:true}:{}),...(cell.clue?{clue:true}:{}),...result.cells[i]}));
   next.generated={answer:result.answer,numbers:result.cells.map(c=>c.number),seed:result.stats.seed,...(result.grade?{grade:result.grade}:{})};
   delete next.suggestions;delete next.eliminations;delete next.rejectedWords;delete next.id;
   if(!next.name||next.name==='Untitled puzzle')next.name='Generated puzzle';
@@ -608,7 +608,7 @@ const generateJob=PuzzleState.solveRunner({
 });
 let generateSource=null;
 $('generate').onclick=protect(async()=>{
- const starters=Number($('generate-starters').value),unique=$('generate-unique').checked,difficulty=$('generate-difficulty').value;
+ const starters=Number($('generate-starters').value),unique=$('generate-unique').checked,difficulty=$('generate-difficulty').value,layout=generateLayout();
  const include=$('generate-include').value.split(/[\s,;]+/).filter(Boolean);
  if(include.length>30)throw new Error('List up to 30 words to include.');
  if(!Number.isInteger(starters)||starters<0||starters>10)throw new Error('Starter letters must be a whole number from 0 to 10.');
@@ -616,9 +616,9 @@ $('generate').onclick=protect(async()=>{
  if(puzzle.cells.some(c=>!c.black&&!c.prefilled&&c.letter||c.guess)&&!await confirmAction('Generating replaces answer letters and suggestions. Letters entered in Edit mode are kept as given letters.','Generate a new puzzle?'))return;
  const {generated,suggestions,image,...grid}=JSON.parse(JSON.stringify(puzzle));
  // Only letters entered in Edit mode are fixed; answer letters are not.
- grid.cells=grid.cells.map(cell=>({...cell,letter:cell.prefilled?cell.letter:'',guess:''}));
+ grid.cells=(layout?layoutBase(grid.cells):grid.cells).map(cell=>({...cell,letter:cell.prefilled?cell.letter:'',guess:''}));
  generateSource={puzzle,revision};$('generate-status').textContent='Starting…';
- void generateJob.start({puzzle:grid,options:{starters,unique,difficulty,include}});
+ void generateJob.start({puzzle:grid,options:{starters,unique,difficulty,include,...(layout?{layout}:{})}});
 });
 $('cancel-generate').onclick=()=>generateJob.requestCancel();
 // Each difficulty starts from its usual number of starter letters; Easy and
@@ -630,7 +630,68 @@ syncDifficulty();
 let answerMarks=null;
 const lettersKey=()=>puzzle.cells.map(c=>c.letter||'.').join('');
 function currentAnswerMarks(){return answerMarks&&answerMarks.puzzle===puzzle&&answerMarks.letters===lettersKey()?answerMarks.wrong:null;}
-function renderGenerated(){$('check-answers').hidden=!PuzzleState.generatedAnswer(puzzle);}
+function renderGenerated(){$('check-answers').hidden=!PuzzleState.generatedAnswer(puzzle);renderLayout();}
+// Word layout target. null while the fields follow the drawn grid; set once
+// the user changes a field. placedLayout remembers the black cells before
+// Place black cells, so Undo can put them back and a new placement can move
+// the cells the app placed while keeping the ones the user drew.
+let layoutTarget=null,placedLayout=null;
+const blackKey=()=>puzzle.cells.map(c=>c.black?1:0).join('');
+const placedCurrent=()=>!!placedLayout&&placedLayout.puzzle===puzzle&&placedLayout.key===blackKey();
+function readLayoutTarget(){
+ const target={words:Number($('layout-words').value),shortest:Number($('layout-shortest').value),longest:Number($('layout-longest').value)};
+ const size=Math.max(puzzle.rows,puzzle.cols);
+ if(!Number.isInteger(target.words)||target.words<1)throw new Error('The number of words must be a whole number of at least 1.');
+ if(!Number.isInteger(target.shortest)||!Number.isInteger(target.longest)||target.shortest<2||target.shortest>target.longest)throw new Error('Word lengths must be whole numbers, at least 2, with the shortest no longer than the longest.');
+ if(target.shortest>size)throw new Error(`A ${puzzle.rows} × ${puzzle.cols} grid has no room for words of ${target.shortest} letters.`);
+ return target;
+}
+function renderLayout(){
+ const summary=PuzzleState.layoutSummary(puzzle);
+ $('layout-summary').textContent=PuzzleState.layoutSummaryText(summary);
+ if(!layoutTarget){$('layout-words').value=summary.words||'';$('layout-shortest').value=Math.min(summary.shortest||3,3);$('layout-longest').value=summary.longest||Math.max(puzzle.rows,puzzle.cols);}
+ $('undo-layout').hidden=!placedCurrent();
+ for(const id of ['layout-words','layout-shortest','layout-longest','layout-mirror','place-blocks'])$(id).disabled=!editMode;
+}
+for(const id of ['layout-words','layout-shortest','layout-longest'])$(id).onchange=protect(()=>{layoutTarget={};$('layout-status').textContent=generateLayout()?'Generate will place black cells for this target, or choose Place black cells to see them first.':'';});
+// The target Generate should place black cells for, or null to keep the grid.
+function generateLayout(){
+ if(!layoutTarget)return null;
+ const target=readLayoutTarget(),placed=placedCurrent();
+ if(!placed&&PuzzleState.meetsLayout(PuzzleState.layoutSummary(puzzle),target))return null;
+ return {...target,mirror:$('layout-mirror').checked,...(placed?{current:puzzle.cells.map(c=>!!c.black)}:{})};
+}
+// The grid without the black cells the app placed, so a new layout can move them.
+function layoutBase(cells){
+ if(!placedCurrent())return cells;
+ return cells.map((cell,i)=>cell.black&&!placedLayout.previous[i]?{...PuzzleState.blankCell(),...(cell.highlight?{highlight:true}:{})}:cell);
+}
+function setBlacks(black){
+ puzzle.cells.forEach((cell,i)=>{
+  if(black[i]===!!cell.black)return;
+  if(black[i])Object.assign(cell,{black:true,clue:false,highlight:false,number:'',letter:'',guess:'',mappingAnchor:false});
+  else Object.assign(cell,{black:false,number:'',letter:'',guess:''});
+  delete cell.numberReview;
+ });
+}
+$('place-blocks').onclick=protect(async()=>{
+ if(!editMode)throw new Error('Switch to Edit mode to change the black cells.');
+ if(puzzle.image)throw new Error('Placing black cells works on a drawn grid. Remove the image first, or create a new grid.');
+ const target={...readLayoutTarget(),mirror:$('layout-mirror').checked},version=revision,current=puzzle;
+ const {generated,suggestions,image,...grid}=JSON.parse(JSON.stringify(puzzle));
+ const previous=placedCurrent()?placedLayout.previous:puzzle.cells.map(c=>!!c.black);
+ grid.cells=layoutBase(grid.cells);
+ $('place-blocks').disabled=true;$('layout-status').textContent='Placing black cells…';
+ try{
+  const result=await api('/api/layout',{puzzle:grid,target});
+  if(current!==puzzle||version!==revision){$('layout-status').textContent='The grid changed while placing, so the layout was not applied.';return;}
+  if(!result.valid){$('layout-status').textContent='No layout meets these word lengths for this grid. Widen the lengths or change the grid size.';return;}
+  layoutTarget=target;setBlacks(result.black);placedLayout={puzzle,previous,key:blackKey()};
+  invalidate();render();
+  $('layout-status').textContent=result.exact?`Placed: ${result.words} words of ${result.shortest}–${result.longest} letters.`:`The closest layout found has ${result.words} words of ${result.shortest}–${result.longest} letters; you asked for ${target.words}.`;
+ }finally{$('place-blocks').disabled=!editMode;}
+});
+$('undo-layout').onclick=()=>{if(!placedCurrent())return;setBlacks(placedLayout.previous);placedLayout=null;$('layout-status').textContent='Layout undone.';invalidate();render();};
 $('check-answers').onclick=()=>{
  const check=PuzzleState.answerCheck(puzzle);
  if(!check)return notify('The black cells or numbers changed since generating, so the answer no longer applies.',true);

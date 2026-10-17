@@ -18,10 +18,14 @@ words that only one dictionary word fits solve the whole grid. Medium: that
 also needs letters every fitting word agrees on. Hard: neither is enough.
 When a grid comes out harder than asked for, letters are given until it fits.
 Words the user asks for are placed before the rest of the grid is filled.
+
+With a word layout target, black cells are placed first (grid_layout) and,
+when a layout does not fill in its share of the time, another is tried.
 """
 import random
 import time
 
+from . import grid_layout
 from .dictionaries import ALPHABETS, normalize
 
 DEFAULT_SECONDS = 20
@@ -50,15 +54,30 @@ def _position(i, cols):
     return f'row {i // cols + 1}, column {i % cols + 1}'
 
 
-def layout(puzzle):
-    """Word slots (lists of cell indices) of a drawable grid, or ValueError."""
-    rows, cols, cells = puzzle['rows'], puzzle['cols'], puzzle['cells']
+def check_rules(puzzle):
+    """Rules, word ends and given numbers and letters a generated puzzle needs, or ValueError."""
+    cells = puzzle['cells']
     rules = puzzle.get('rules') or {}
     if rules.get('maxLettersPerNumber', 1) != 1 or rules.get('uniqueLetters', True) is not True:
         raise ValueError('Generating needs the standard rules: one letter per number and a different letter for each number.')
     flags = ('openBeforeAcross', 'openAfterAcross', 'openBeforeDown', 'openAfterDown')
     if any(cell.get(flag) for cell in cells for flag in flags):
         raise ValueError('A generated puzzle has closed word ends. Clear the open word-boundary marks first.')
+    letter_of, number_of = {}, {}
+    for cell in cells:
+        number, letter = cell.get('number', ''), cell.get('letter', '')
+        if cell.get('black') or not number or not letter:
+            continue
+        if letter_of.setdefault(number, letter) != letter:
+            raise ValueError(f'Number {number} has two different letters ({letter_of[number]} and {letter}).')
+        if number_of.setdefault(letter, number) != number:
+            raise ValueError(f'Letter {letter} is given to two numbers ({number_of[letter]} and {number}).')
+
+
+def layout(puzzle):
+    """Word slots (lists of cell indices) of a drawable grid, or ValueError."""
+    rows, cols, cells = puzzle['rows'], puzzle['cols'], puzzle['cells']
+    check_rules(puzzle)
     slots = []
     for across in (True, False):
         for line in range(rows if across else cols):
@@ -81,15 +100,6 @@ def layout(puzzle):
         more = f' and {len(loose) - 1} more' if len(loose) > 1 else ''
         raise ValueError(f'The letter cell at {_position(loose[0], cols)}{more} is not part of any word. '
                          'Make it black or extend a word through it.')
-    letter_of, number_of = {}, {}
-    for cell in cells:
-        number, letter = cell.get('number', ''), cell.get('letter', '')
-        if cell.get('black') or not number or not letter:
-            continue
-        if letter_of.setdefault(number, letter) != letter:
-            raise ValueError(f'Number {number} has two different letters ({letter_of[number]} and {letter}).')
-        if number_of.setdefault(letter, number) != number:
-            raise ValueError(f'Letter {letter} is given to two numbers ({number_of[letter]} and {number}).')
     return slots
 
 
@@ -360,7 +370,8 @@ def _numbering(cells, letters, rng):
 
 
 def options(raw):
-    """Checked generator options: starters, seconds, unique, difficulty, include and an optional seed."""
+    """Checked generator options: starters, seconds, unique, difficulty, include, an optional seed
+    and an optional word layout target (checked against the grid in prepare)."""
     if not isinstance(raw, dict):
         raise ValueError('Generator options must be an object.')
     starters, seconds, seed = raw.get('starters', 2), raw.get('seconds', DEFAULT_SECONDS), raw.get('seed')
@@ -378,19 +389,34 @@ def options(raw):
         raise ValueError('The single-answer setting must be true or false.')
     if seed is not None and (type(seed) is not int or not 0 <= seed < 1 << 31):
         raise ValueError('The generator seed must be a whole number from 0 to 2147483647.')
-    return dict(starters=starters, seconds=seconds, unique=unique, difficulty=difficulty, include=include, seed=seed)
+    relayout = raw.get('layout')
+    if relayout is not None and not isinstance(relayout, dict):
+        raise ValueError('The word layout must be an object.')
+    return dict(starters=starters, seconds=seconds, unique=unique, difficulty=difficulty, include=include, seed=seed,
+                relayout=relayout)
 
 
-def included_words(puzzle, slots, include):
-    """Words to include, normalized and checked against the grid, or ValueError."""
+def included_words(puzzle, slots, include, target=None):
+    """Words to include, normalized and checked against the grid, or ValueError.
+
+    With a layout target the black cells are not placed yet, so words are
+    checked against its length limits instead of the grid's words.
+    """
     alphabet = set(ALPHABETS[puzzle['language']])
     words = list(dict.fromkeys(normalize(word) for word in include if word.strip()))
+    for word in words:
+        if not set(word) <= alphabet:
+            raise ValueError(f'{word} uses a letter outside the selected language.')
+        if target and not target['shortest'] <= len(word) <= target['longest']:
+            raise ValueError(f'{word} has {len(word)} letters, outside the word lengths {target["shortest"]} to {target["longest"]}.')
+    if target:
+        if len(words) > target['words']:
+            raise ValueError(f'{len(words)} words to include, but the layout has only {target["words"]} words.')
+        return words
     lengths = {}
     for slot in slots:
         lengths[len(slot)] = lengths.get(len(slot), 0) + 1
     for word in words:
-        if not set(word) <= alphabet:
-            raise ValueError(f'{word} uses a letter outside the selected language.')
         if len(word) not in lengths:
             sizes = ', '.join(map(str, sorted(lengths)))
             raise ValueError(f'{word} has {len(word)} letters, but the grid has only words of {sizes} letters.')
@@ -402,11 +428,44 @@ def included_words(puzzle, slots, include):
 
 
 def prepare(puzzle, raw):
-    """Slots, checked options and normalized words to include; ValueError before any search."""
-    slots = layout(puzzle)
+    """Slots, checked options and normalized words to include; ValueError before any search.
+
+    With a layout target, slots is None: the black cells come later.
+    """
     checked = options(raw)
-    checked['include'] = included_words(puzzle, slots, checked['include'])
+    target = checked['relayout']
+    if target is not None:
+        check_rules(puzzle)
+        current = target.get('current')
+        if current is not None and (not isinstance(current, list) or len(current) != len(puzzle['cells']) or
+                                    any(type(black) is not bool for black in current) or
+                                    any(cell.get('black') and not black for cell, black in zip(puzzle['cells'], current))):
+            raise ValueError('The current layout needs one black-cell flag per cell, keeping your black cells.')
+        target = dict(grid_layout.check_target(target, puzzle['rows'], puzzle['cols']), current=current)
+        checked['relayout'] = target
+        slots = None
+    else:
+        slots = layout(puzzle)
+    checked['include'] = included_words(puzzle, slots, checked['include'], target)
     return slots, checked
+
+
+def _with_black(puzzle, black):
+    """The puzzle with these cells made black (and emptied)."""
+    return dict(puzzle, cells=[dict(cell, black=True, number='', letter='') if i in black and not cell.get('black') else cell
+                               for i, cell in enumerate(puzzle['cells'])])
+
+
+def _meets(puzzle, target):
+    """(puzzle, slots) to try first: the layout already placed, or the grid when it meets the target."""
+    current = target['current']
+    candidate = _with_black(puzzle, {i for i, black in enumerate(current) if black}) if current else puzzle
+    try:
+        slots = layout(candidate)
+    except ValueError:
+        return puzzle, None
+    fits = all(target['shortest'] <= len(slot) <= target['longest'] for slot in slots)
+    return (candidate, slots) if fits and (current or len(slots) == target['words']) else (puzzle, None)
 
 
 def _numbered(cells, letters, numbers, given):
@@ -494,8 +553,59 @@ def _single_answer(cells, slots, words, letters, numbers, given, rng, deadline, 
         extra += 1
 
 
+def _fill(puzzle, slots, usable, include, rng, deadline, cancel, progress, stats, diagnostics):
+    """(letters, stop reason) for one layout."""
+    lengths = {len(slot) for slot in slots}
+    missing = sorted(length for length in lengths if not any(len(w) == length for w in usable))
+    if missing:
+        diagnostics.append('The dictionary has no words of length ' + ', '.join(map(str, missing)) + '.')
+        return None, 'search_exhausted'
+    filler = _Filler(puzzle, slots, usable, rng, deadline, cancel, progress, include=include)
+    letters, reason = filler.run()
+    stats.update(nodes=stats['nodes'] + filler.nodes, restarts=stats['restarts'] + filler.restarts)
+    return letters, reason
+
+
+def _fill_layouts(puzzle, target, usable, include, rng, deadline, cancel, progress, stats, diagnostics):
+    """Place black cells for the target and fill, trying new layouts: (letters, reason, puzzle, slots)."""
+    need = {}
+    for word in include:
+        need[len(word)] = need.get(len(word), 0) + 1
+    first, slots = _meets(puzzle, target)
+    share = max(2.0, (deadline - time.monotonic()) / 4)
+    tried, reason = 0, 'time_limit'
+    while time.monotonic() < deadline and not cancel():
+        candidate = first if tried == 0 else puzzle
+        if slots is None:
+            progress(dict(stage='layout', nodes=stats['nodes'], restarts=tried))
+            black, breaks = grid_layout.plan(puzzle, target, rng, need=need, cancel=cancel,
+                                                             seconds=min(grid_layout.MAX_SECONDS, max(0.2, deadline - time.monotonic())))[:2]
+            if black is None or breaks:
+                reason = 'no_layout'
+                break
+            candidate = _with_black(puzzle, black)
+            slots = layout(candidate)
+        tried += 1
+        letters, reason = _fill(candidate, slots, usable, include, rng, min(deadline, time.monotonic() + share),
+                                cancel, progress, stats, [])
+        if letters is not None or reason == 'cancelled':
+            stats.update(layouts=tried)
+            if len(slots) != target['words']:
+                diagnostics.append(f'The closest layout found has {len(slots)} words; you asked for {target["words"]}.')
+            return letters, reason, candidate, slots
+        slots = None
+    stats.update(layouts=tried)
+    if reason == 'no_layout':
+        diagnostics.append('No layout meets the word lengths for this grid. Widen the length limits or change the grid size.')
+    else:
+        diagnostics.append(f'Tried {tried} layout{"" if tried == 1 else "s"}; none filled within the time limit. '
+                           'Try again, widen the word lengths, use fewer words or import a larger dictionary.')
+    # One layout running out of options says nothing about other layouts.
+    return None, 'cancelled' if cancel() else 'no_layout' if reason == 'no_layout' else 'time_limit', puzzle, None
+
+
 def generate(puzzle, words, *, starters=2, seconds=DEFAULT_SECONDS, unique=True, difficulty='any', include=(),
-             seed=None, cancel=lambda: False, progress=lambda update: None):
+             seed=None, relayout=None, cancel=lambda: False, progress=lambda update: None):
     """Fill, number and choose starter letters for a drawn grid.
 
     starters is how many letters to give in addition to the letters already
@@ -504,17 +614,24 @@ def generate(puzzle, words, *, starters=2, seconds=DEFAULT_SECONDS, unique=True,
     with unique, more letters are given while another answer fits. The level
     reached is always measured. Filling and checking each get up to seconds.
     Words in include are placed first; ones missing from the dictionary are
-    used for this puzzle only. The result holds the numbered cells (only given
-    letters filled in) and the full answer; the answer is not shown as letters.
+    used for this puzzle only. With relayout (words, shortest, longest, mirror,
+    current), black cells are placed to match and other layouts are tried
+    while one does not fill; current (black flags of a layout already placed
+    on this grid) is tried first. The result holds the
+    numbered cells (black cells and given letters filled in) and the full
+    answer; the answer is not shown as letters.
     """
     started = time.monotonic()
     slots, checked = prepare(puzzle, dict(starters=starters, seconds=seconds, unique=unique, difficulty=difficulty,
-                                          include=list(include), seed=seed))
-    starters, seconds, unique, difficulty, include, seed = checked.values()
+                                          include=list(include), seed=seed, layout=relayout))
+    starters, seconds, unique, difficulty, include, seed, target = checked.values()
     seed = random.SystemRandom().randrange(1 << 31) if seed is None else seed
     rng = random.Random(seed)
     alphabet = set(ALPHABETS[puzzle['language']])
-    lengths = {len(slot) for slot in slots}
+    if target:
+        lengths = set(range(target['shortest'], target['longest'] + 1))
+    else:
+        lengths = {len(slot) for slot in slots}
     usable = {w for w in words if len(w) in lengths and set(w) <= alphabet}
     diagnostics = []
     added = [word for word in include if word not in usable]
@@ -522,20 +639,18 @@ def generate(puzzle, words, *, starters=2, seconds=DEFAULT_SECONDS, unique=True,
         diagnostics.append(', '.join(added) + (' is not in the dictionary and counted as a word' if len(added) == 1 else
                                                ' are not in the dictionary and counted as words') + ' for this puzzle only.')
     usable = sorted(usable | set(include))
-    stats = dict(seed=seed, dictionaryWords=len(usable), words=len(slots), nodes=0, restarts=0, included=len(include))
-    missing = sorted(length for length in lengths if not any(len(w) == length for w in usable))
-    if missing:
-        diagnostics.append('The dictionary has no words of length ' + ', '.join(map(str, missing)) + '.')
-        letters, reason = None, 'search_exhausted'
+    stats = dict(seed=seed, dictionaryWords=len(usable), nodes=0, restarts=0, included=len(include))
+    if target:
+        letters, reason, puzzle, slots = _fill_layouts(puzzle, target, usable, include, rng, started + seconds,
+                                                       cancel, progress, stats, diagnostics)
     else:
-        filler = _Filler(puzzle, slots, usable, rng, started + seconds, cancel, progress, include=include)
-        letters, reason = filler.run()
-        stats.update(nodes=filler.nodes, restarts=filler.restarts)
+        letters, reason = _fill(puzzle, slots, usable, include, rng, started + seconds, cancel, progress, stats, diagnostics)
     stats.update(elapsedSeconds=round(time.monotonic() - started, 3), stopReason=reason,
-                 exhaustive=reason == 'search_exhausted')
+                 exhaustive=reason == 'search_exhausted' and not target)
     if letters is None:
         status = 'cancelled' if reason == 'cancelled' else 'no_fill'
         return dict(status=status, stats=stats, diagnostics=diagnostics)
+    stats['words'] = len(slots)
     cells = puzzle['cells']
     numbers = _numbering(cells, letters, rng)
     fixed = {cell['letter'] for cell in cells if not cell.get('black') and cell.get('letter')}
