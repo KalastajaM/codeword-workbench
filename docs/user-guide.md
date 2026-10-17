@@ -4,7 +4,7 @@ Installation is in the [README](../README.md). Word lists are covered in [dictio
 
 ## First puzzle
 
-The **Getting started** card holds **How codeword solving works**, **Small showcase**, **Full-size showcase** and **Watch it solve**. On wide screens it is the first card on the right; on narrow screens it sits above the puzzle. Click its heading to collapse or expand it; the browser remembers your choice, so a collapsed card stays collapsed the next time you open the app. Hovering over the logo shows a one-line summary of what the app does.
+The **Getting started** card holds **How solving works**, **Small showcase**, **Full-size showcase** and **Watch it solve**. On wide screens it is the first card on the right; on narrow screens it sits above the puzzle. Click its heading to collapse or expand it; the browser remembers your choice, so a collapsed card stays collapsed the next time you open the app. Hovering over the logo shows a one-line summary of what the app does.
 
 Status messages appear below the header and stay visible while you scroll. Close one with **×** at its top left; the next message shows it again.
 
@@ -14,7 +14,7 @@ Select **Small showcase**, then **Solve puzzle**. The example deliberately permi
 
 **Full-size showcase** loads an original 13 × 13 English codeword with numbers only and no letters given. It is set to solve without a dictionary using **Deep** search. While the search runs, the grid shows its best unverified guess so far; when it finishes, the notice reports how many cells of the top alternative match the puzzle's known answer. The answer is used only for that count and never fills the grid. The grid was generated from common English words by `scripts/build_sample_puzzle.py`.
 
-**How codeword solving works** opens a page in a new tab that shows the solving stages and steps through a strict search on a small example. You can confirm or release letters in its example grid to see how the search changes. The page is `static/how-it-works.html`; it uses no server data and also opens directly from the file.
+**How solving works** opens a page in a new tab that shows the solving stages and steps through a strict search on a small example. You can confirm or release letters in its example grid to see how the search changes. The page is `static/how-it-works.html`; it uses no server data and also opens directly from the file.
 
 To create your own puzzle:
 
