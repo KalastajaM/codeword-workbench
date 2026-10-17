@@ -641,20 +641,20 @@ const generateJob=PuzzleState.solveRunner({
   if(result.status!=='generated'){
    const reason=result.stats?.stopReason;
    const text=reason==='cancelled'?'Generating cancelled. The grid is unchanged.':reason==='search_exhausted'?'No fill exists: the search tried every option with the current dictionary. Change the black cells, the fixed letters or the dictionary.':'No fill found within the time limit. That does not mean none exists: try again, or add black cells to shorten long words.';
-   $('generate-status').textContent=text+(notes?' '+notes:'');notify($('generate-status').textContent,reason!=='cancelled');return;
+   $('generate-status').textContent='';notify(text+(notes?' '+notes:''),reason!=='cancelled');return;
   }
   const source=generateSource;generateSource=null;
-  if(!source||source.puzzle!==puzzle||source.revision!==revision){$('generate-status').textContent='The grid changed while generating, so the result was not applied. Generate again.';return;}
+  if(!source||source.puzzle!==puzzle||source.revision!==revision){$('generate-status').textContent='';notify('The grid changed while generating, so the result was not applied. Generate again.',true);return;}
   const next=JSON.parse(JSON.stringify(puzzle));
   next.cells=next.cells.map((cell,i)=>({...PuzzleState.blankCell(),...(cell.highlight&&!result.cells[i].black?{highlight:true}:{}),...(cell.clue?{clue:true}:{}),...result.cells[i]}));
   next.generated={answer:result.answer,numbers:result.cells.map(c=>c.number),seed:result.stats.seed,...(result.grade?{grade:result.grade}:{})};
   delete next.suggestions;delete next.eliminations;delete next.rejectedWords;delete next.id;
   if(!next.name||next.name==='Untitled puzzle')next.name='Generated puzzle';
   setPuzzle(next,false);savedFingerprint='';
-  $('generate-status').textContent=PuzzleState.generatedSummary(result)+(notes?' '+notes:'');
-  notify(`Puzzle generated and opened in Puzzle mode. ${$('generate-status').textContent} Use Print or image to print it.`);
+  $('generate-status').textContent='';
+  notify(`Puzzle generated and opened in Puzzle mode. ${PuzzleState.generatedSummary(result)}${notes?' '+notes:''} Use Print or image to print it.`);
  },
- onError:error=>{generateSource=null;$('generate-status').textContent='Generating failed: '+error.message;notify($('generate-status').textContent,true);},
+ onError:error=>{generateSource=null;$('generate-status').textContent='';notify('Generating failed: '+error.message,true);},
  onCancelError:error=>notify('Could not confirm cancellation: '+error.message+'. Generating stops at its time limit.',true)
 });
 let generateSource=null;
