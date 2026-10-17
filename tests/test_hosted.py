@@ -1,5 +1,7 @@
 """Hosted runtime is explicit, origin constrained, and protected by default."""
+import contextlib
 import http.client
+import io
 import json
 import tempfile
 import threading
@@ -7,6 +9,7 @@ import time
 import unittest
 from pathlib import Path
 
+from app import __version__
 from app.server import make_server
 from run import runtime_options
 
@@ -18,6 +21,14 @@ class HostedConfigurationTests(unittest.TestCase):
         self.assertEqual(runtime_options([], {}), {'port':8765,'data_dir':None})
         self.assertEqual(runtime_options(['--port','9000','--data-dir','/tmp/puzzles'],{})['port'],9000)
         self.assertEqual(runtime_options([],{'PORT':'9999','CODEWORD_ACCESS_PASSWORD':PASSWORD}), {'port':8765,'data_dir':None})
+
+    def test_version_flag_reports_release(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as stop:
+            runtime_options(['--version'], {})
+        self.assertEqual(stop.exception.code, 0)
+        self.assertEqual(out.getvalue().strip(), 'Codeword Workbench ' + __version__)
+        self.assertRegex(__version__, r'^\d+\.\d+\.\d+$')
 
     def test_hosted_runtime_env_and_cli_override(self):
         options=runtime_options([],{'CODEWORD_HOSTED':'1','PORT':'8088','RAILWAY_PUBLIC_DOMAIN':'puzzle.example.test','CODEWORD_ACCESS_PASSWORD':PASSWORD})

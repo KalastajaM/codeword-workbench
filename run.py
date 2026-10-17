@@ -3,6 +3,7 @@
 import argparse
 import os
 from pathlib import Path
+from app import __version__
 from app.server import make_server
 
 
@@ -11,6 +12,7 @@ def runtime_options(argv=None, environ=None):
     parser = argparse.ArgumentParser(description='Run Codeword Workbench locally or in explicit hosted mode.')
     parser.add_argument('--port', type=int, default=None)
     parser.add_argument('--data-dir', type=Path, default=None)
+    parser.add_argument('--version', action='version', version='Codeword Workbench ' + __version__)
     args = parser.parse_args(argv)
     if env.get('CODEWORD_HOSTED') != '1':
         return {'port':args.port if args.port is not None else 8765, 'data_dir':args.data_dir}
