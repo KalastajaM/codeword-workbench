@@ -674,6 +674,24 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
                     # Report a grid or word list that cannot work before starting a job.
                     options = prepare(puzzle, payload.get('options', {}))[1]
                     self.send_data(202, jobs.start(puzzle, slots, partial(run_generate, options=options, words_dir=words_dir())))
+                elif method == 'POST' and path == '/api/layout':
+                    from .generator import check_rules
+                    from . import grid_layout
+                    import random
+                    payload = self.payload()
+                    puzzle = check_puzzle(payload.get('puzzle'))
+                    check_rules(puzzle)
+                    target = grid_layout.check_target(payload.get('target'), puzzle['rows'], puzzle['cols'])
+                    if not slots.acquire(blocking=False):
+                        self.send_data(429, {'error': 'Another search is running. Try again shortly.'})
+                        return
+                    try:
+                        black, breaks, count, lengths = grid_layout.plan(puzzle, target, random.Random())
+                    finally:
+                        slots.release()
+                    self.send_data(200, {'black': [i in black for i in range(len(puzzle['cells']))], 'words': count,
+                                         'shortest': lengths[0] if lengths else 0, 'longest': lengths[-1] if lengths else 0,
+                                         'valid': breaks == 0, 'exact': breaks == 0 and count == target['words']})
                 elif method in ('GET', 'DELETE') and (path.startswith('/api/solve-jobs/') or path.startswith('/api/generate-jobs/')):
                     key = path.rsplit('/',1)[1]
                     if not ID_RE.fullmatch(key):

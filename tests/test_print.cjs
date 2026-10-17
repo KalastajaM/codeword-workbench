@@ -80,3 +80,18 @@ test('The sheet prints the difficulty only when it is given', () => {
   assert.match(sheetSvg(puzzle, {grade: 'medium'}), />Difficulty: Medium</);
   assert.doesNotMatch(sheetSvg(puzzle), /Difficulty/);
 });
+
+test('Word layout summary counts words the way the generator does', () => {
+  const {layoutSummary, layoutSummaryText, meetsLayout} = require('../static/state.js');
+  const rows = ['.....', '.#.#.', '.....', '.#.#.', '.....'];
+  const puzzle = canonicalPuzzle({rows: 5, cols: 5, language: 'en', rules: {}, cells: rows.join('').split('').map(ch => ({black: ch === '#'}))});
+  const summary = layoutSummary(puzzle);
+  assert.deepEqual(summary, {words: 6, shortest: 5, longest: 5, loose: 0});
+  assert.equal(layoutSummaryText(summary), 'This grid has 6 words of 5 letters.');
+  assert.equal(meetsLayout(summary, {words: 6, shortest: 3, longest: 5}), true);
+  assert.equal(meetsLayout(summary, {words: 6, shortest: 3, longest: 4}), false);
+  puzzle.cells[6].black = false; puzzle.cells[1].black = true; puzzle.cells[5].black = true;
+  assert.match(layoutSummaryText(layoutSummary(puzzle)), /1 letter cell is in no word\.$/);
+  assert.equal(layoutSummaryText(layoutSummary(canonicalPuzzle({rows: 1, cols: 1, language: 'en', cells: [{black: true}]}))),
+    'No words yet: draw black cells, or set a target and place them.');
+});

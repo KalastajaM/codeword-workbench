@@ -444,6 +444,20 @@ function answerCheckText(check){
  if(!entered)return `No letters yet; ${check.total} cells to fill.`;
  return `${entered} of ${check.total} cells filled: ${check.right} right, ${wrong} wrong${wrong?' (outlined in red)':''}. ${check.empty} cell${check.empty===1?'':'s'} still empty.`;
 }
+// Words of the drawn grid as the generator counts them: runs of two or more
+// letter cells. loose counts letter cells that are in no word.
+function layoutSummary(puzzle){
+ const runs=slots(puzzle),lengths=runs.map(s=>s.cells.length),covered=new Set(runs.flatMap(s=>s.cells));
+ return {words:runs.length,shortest:lengths.length?Math.min(...lengths):0,longest:lengths.length?Math.max(...lengths):0,
+  loose:puzzle.cells.filter((c,i)=>!c.black&&!covered.has(i)).length};
+}
+function layoutSummaryText(summary){
+ if(!summary.words)return 'No words yet: draw black cells, or set a target and place them.';
+ const lengths=summary.shortest===summary.longest?`${summary.shortest} letters`:`${summary.shortest}–${summary.longest} letters`;
+ return `This grid has ${summary.words} word${summary.words===1?'':'s'} of ${lengths}.`+(summary.loose?` ${summary.loose} letter cell${summary.loose===1?' is':'s are'} in no word.`:'');
+}
+// Whether the grid already matches a word layout target.
+function meetsLayout(summary,target){return !summary.loose&&summary.words===target.words&&summary.shortest>=target.shortest&&summary.longest<=target.longest;}
 const LEVEL_NAMES={easy:'Easy',medium:'Medium',hard:'Hard'};
 const LEVEL_MEANING={easy:'it can be solved word by word',medium:'in places it needs letters that every fitting word agrees on',hard:'deduction alone does not solve it everywhere'};
 function generatedSummary(result){
@@ -556,5 +570,5 @@ function solveProgressText(progress,stopping){
 // numberPosition is where the puzzle prints its numbers. Over an image the
 // app's numbers go in the opposite corner so they do not cover the print.
 function displayNumberPosition(puzzle){const position=['top-left','top-right','bottom-left','bottom-right'].includes(puzzle.numberPosition)?puzzle.numberPosition:'top-left';if(!puzzle.image)return position;const [vertical,horizontal]=position.split('-');return `${vertical==='top'?'bottom':'top'}-${horizontal==='left'?'right':'left'}`;}
-const helpers={displayNumberPosition,generatedSummary,generatedAnswer,answerCheck,answerCheckText,letterCertainty,savedPuzzleView,renumberCell,workspaceModeView,visibleRuledOut,numberIsOpen,canonicalEliminations,ruledOutLetters,setRuledOut,slotIdentity,rejectedWordsFor,setWordRejected,eliminationSuggestionGroups,wordAssessmentQueue,assessedWord,assessedWordLabel,displayedPuzzleWords,solvedWordActions,solvedWordEvidence,solvedWordsView,solvedWordSelection,solvedWordPatternScore,mappingCyclePlan,numberMovePlan,clearMappingProvenance,numberRemovalPlan,numberAssignmentPlan,dictionaryInputWords,dictionarySearchSummary,nordicLetters,completeWordText,selectedWordCheckText,patternScoreText,candidateEvidenceText,wordLookupText,lookupPattern,dictionaryPages,languagePresentation,dictionaryEditor,cellWord,letterOwners,moveLetterAssignment,resetSuggestions,editConfirmedLetter,cancelledResult,solveProgressText,solveStopExplanation,hasSolveProgress,mappingLetterInfo,changeMappingLetter,resetProgress,suggestionLabel,restoredWords,wordEvidenceLabel,plausibilityLabel,plausibilityDetail,candidateDisplay,solveRunner,canonicalPuzzle,slots,candidateLetters,matchesSlot,blankCell,numberEntry,imageBoundsFromPercent,fitScale,suggestedLetter,mappingDeductions,solveSummary,refreshDeductions,confirmCells,unconfirmCells,numberCells,undoConfirmation,acceptanceHistory,wordChoices,candidateSelection,candidateSearchPuzzle};if(typeof module!=='undefined'&&module.exports)module.exports=helpers;else root.PuzzleState=helpers;
+const helpers={displayNumberPosition,layoutSummary,layoutSummaryText,meetsLayout,generatedSummary,generatedAnswer,answerCheck,answerCheckText,letterCertainty,savedPuzzleView,renumberCell,workspaceModeView,visibleRuledOut,numberIsOpen,canonicalEliminations,ruledOutLetters,setRuledOut,slotIdentity,rejectedWordsFor,setWordRejected,eliminationSuggestionGroups,wordAssessmentQueue,assessedWord,assessedWordLabel,displayedPuzzleWords,solvedWordActions,solvedWordEvidence,solvedWordsView,solvedWordSelection,solvedWordPatternScore,mappingCyclePlan,numberMovePlan,clearMappingProvenance,numberRemovalPlan,numberAssignmentPlan,dictionaryInputWords,dictionarySearchSummary,nordicLetters,completeWordText,selectedWordCheckText,patternScoreText,candidateEvidenceText,wordLookupText,lookupPattern,dictionaryPages,languagePresentation,dictionaryEditor,cellWord,letterOwners,moveLetterAssignment,resetSuggestions,editConfirmedLetter,cancelledResult,solveProgressText,solveStopExplanation,hasSolveProgress,mappingLetterInfo,changeMappingLetter,resetProgress,suggestionLabel,restoredWords,wordEvidenceLabel,plausibilityLabel,plausibilityDetail,candidateDisplay,solveRunner,canonicalPuzzle,slots,candidateLetters,matchesSlot,blankCell,numberEntry,imageBoundsFromPercent,fitScale,suggestedLetter,mappingDeductions,solveSummary,refreshDeductions,confirmCells,unconfirmCells,numberCells,undoConfirmation,acceptanceHistory,wordChoices,candidateSelection,candidateSearchPuzzle};if(typeof module!=='undefined'&&module.exports)module.exports=helpers;else root.PuzzleState=helpers;
 })(typeof globalThis!=='undefined'?globalThis:this);

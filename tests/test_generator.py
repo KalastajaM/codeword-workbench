@@ -118,6 +118,50 @@ class DifficultyTests(unittest.TestCase):
         self.assertGreater(hard, 190)
 
 
+class RelayoutTests(unittest.TestCase):
+    WORDS = WORDS + 'TEN NET TAN ANT CAT ACT OAT TOE ONE EON NOT TON CON COT TEA EAT ATE ETA'.split()
+
+    def test_open_grid_gets_black_cells_for_the_target(self):
+        p = grid(['...'] * 3)
+        result = generate(p, self.WORDS, seed=1, starters=0, unique=False,
+                          relayout=dict(words=4, shortest=3, longest=3), seconds=10)
+        self.assertEqual(result['status'], 'generated', result)
+        black = {i for i, cell in enumerate(result['cells']) if cell['black']}
+        self.assertTrue(black, 'Black cells were placed')
+        laid = dict(p, cells=[dict(cell, black=i in black) for i, cell in enumerate(p['cells'])])
+        slots = layout(laid)
+        self.assertEqual(black, {4}, 'The only 3 × 3 layout with four 3-letter words is a ring')
+        self.assertTrue(all(len(slot) == 3 for slot in slots))
+        self.assertEqual(result['stats']['words'], len(slots))
+        self.assertTrue(set(words_in(laid, result['answer'])) <= set(self.WORDS))
+
+    def test_placed_layout_is_tried_first(self):
+        from app.generator import _meets, prepare
+        p = grid(['.....'] * 5)
+        current = [ch == '#' for ch in ''.join(['.....', '.#.#.', '.....', '.#.#.', '.....'])]
+        target = prepare(p, dict(layout=dict(words=6, shortest=3, longest=5, current=current)))[1]['relayout']
+        first, slots = _meets(p, target)
+        self.assertEqual([cell['black'] for cell in first['cells']], current)
+        self.assertEqual(len(slots), 6)
+        # Without a placed layout, an open grid that misses the target is not tried as it is.
+        self.assertIsNone(_meets(p, dict(target, current=None))[1])
+
+    def test_layout_target_is_checked_before_any_search(self):
+        from app.generator import prepare
+        p = grid(['.....'] * 5)
+        for bad, message in [(dict(words=6, shortest=6), 'shortest no longer'),
+                             (dict(words=6, current=[True]), 'one black-cell flag per cell'),
+                             ('6', 'must be an object')]:
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, message):
+                prepare(p, dict(layout=bad))
+        with self.assertRaisesRegex(ValueError, 'outside the word lengths 3 to 4'):
+            prepare(p, dict(layout=dict(words=6, shortest=3, longest=4), include=['CANOE']))
+        # A grid with a cell in no word is fine when black cells are still to come.
+        slots, checked = prepare(grid(['.#...', '#....', '.....', '.....', '.....']), dict(layout=dict(words=6)))
+        self.assertIsNone(slots)
+        self.assertEqual(checked['relayout']['longest'], 5)
+
+
 class FillTests(unittest.TestCase):
     def assert_codeword(self, puzzle, result):
         self.assertEqual(result['status'], 'generated')
@@ -270,6 +314,15 @@ class GenerateHTTPTests(unittest.TestCase):
         code, body = self.request('/api/generate-jobs', dict(puzzle=grid(['...']), options=dict(include=['HOUSE'])))
         self.assertEqual(code, 400)
         self.assertIn('HOUSE has 5 letters', body['error'])
+
+    def test_layout_endpoint_places_black_cells(self):
+        code, body = self.request('/api/layout', dict(puzzle=grid(['.......'] * 7), target=dict(words=10, shortest=3, longest=5)))
+        self.assertEqual(code, 200, body)
+        self.assertEqual(len(body['black']), 49)
+        self.assertTrue(body['valid'])
+        self.assertTrue(3 <= body['shortest'] and body['longest'] <= 5)
+        code, body = self.request('/api/layout', dict(puzzle=grid(['...']), target=dict(words=2, shortest=4)))
+        self.assertEqual(code, 400)
 
 
 class StoredAnswerTests(unittest.TestCase):
