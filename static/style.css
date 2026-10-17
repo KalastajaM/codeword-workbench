@@ -184,3 +184,7 @@ button.rule-out-group{padding:3px 7px;font-size:11px;background:transparent;colo
 .print-preview{background:#fff;border-radius:8px;padding:10px;max-height:60vh;overflow:auto;display:flex;flex-direction:column;gap:12px;align-items:center}.print-preview svg{max-width:100%;height:auto}
 #print-sheet{display:none}
 @media print{body.printing>*:not(#print-sheet){display:none!important}body.printing{background:#fff}body.printing #print-sheet{display:block}#print-sheet svg{display:block;width:100%;height:auto;max-height:100vh;page-break-after:always;break-after:page}#print-sheet svg:last-child{page-break-after:auto;break-after:auto}}
+button[aria-disabled=true]{opacity:.4;cursor:default}button[aria-disabled=true]:hover{background:#1b293b}
+#image-adjustments summary .help-button{margin-left:8px;vertical-align:middle}
+.range-field{display:flex;align-items:center;gap:10px}.range-field input{flex:1;min-width:0;margin:0}
+#remove-image{margin-bottom:10px}
