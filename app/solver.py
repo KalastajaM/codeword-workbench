@@ -31,6 +31,8 @@ CLEAR_MARGIN=15.0
 # Live preview throttles, in seconds.
 PREVIEW_SECONDS=0.2
 MARGIN_SECONDS=1.0
+# Most steps kept for replaying how a dictionary-free search settled.
+REPLAY_FRAMES=60
 BEAM_WIDTH=64
 MAX_FRONTIER_CELLS=200000
 
@@ -256,13 +258,20 @@ def _global_heuristic(p, slots, base, rules, result, started, deadline, control)
     affected=[set() for _ in variables]
     for j,vs in enumerate(slot_vars):
         for v in vs: affected[v].add(j)
+    # Runs revisit the same words often; a slot's value depends only on its
+    # text and, through ruled-out letters, on which variables hold it.
+    evaluated={}
     def evaluate(j, assignment):
         text=''.join(assignment[v] for v in slot_vars[j])
+        value=evaluated.get((j,text))
+        if value is not None: return value
         violations=sum(text.count(pattern) for pattern in forbidden)
         # Ruled-out letters and rejected words are hard rules, repaired like forbidden patterns.
         violations+=sum(1 for v in slot_vars[j] if assignment[v] in excluded[v])
         if j<len(slots) and _rejected(slots[j],text,rules): violations+=1
-        return _score(text,language,rules,*boundaries[j]), violations
+        if len(evaluated)>500000: evaluated.clear()
+        value=evaluated[(j,text)]=(_score(text,language,rules,*boundaries[j]), violations)
+        return value
     # Neighbouring states of one run differ by a swap or two. Keep only the
     # best state of each run, polished to a local optimum, and require kept
     # mappings to differ in several numbers so alternatives are distinct.
@@ -271,8 +280,11 @@ def _global_heuristic(p, slots, base, rules, result, started, deadline, control)
     # the running state before a run is polished, at most every PREVIEW_SECONDS.
     # Its certainty margins are recomputed at most every MARGIN_SECONDS.
     live=dict(score=-math.inf,assignment=None,shown=0.0,margins_for=None,margins_at=0.0)
+    # Every improvement of the best mapping, for replaying how the grid settled.
+    frames=[]; began=time.monotonic()
     def publish(assignment, score, force=False):
         now=time.monotonic()
+        if score>(frames[-1][2] if frames else -math.inf): frames.append((now-began,list(assignment),score))
         if score<=live['score'] or (not force and now-live['shown']<PREVIEW_SECONDS): return
         preview=['']*len(p['cells'])
         for i,v in cell_var.items(): preview[i]=assignment[v]
@@ -410,6 +422,20 @@ def _global_heuristic(p, slots, base, rules, result, started, deadline, control)
         solution_words=[dict(cells=s['cells'],text=''.join(letters[i] for i in s['cells']),verified=False,source='unverified') for s in slots]
         result['solutions'].append(dict(letters=letters,score=round(score,3),words=solution_words,numberMargins=number_margins(assignment)))
     result['stats'].update(closeMargin=CLOSE_MARGIN,clearMargin=CLEAR_MARGIN)
+    if frames and solutions:
+        # The replay ends on the top alternative, even if a throttled preview
+        # never showed it, and keeps at most REPLAY_FRAMES evenly spread steps.
+        top=max(solutions,key=solutions.get)
+        if tuple(frames[-1][1])!=top: frames.append((time.monotonic()-began,list(top),solutions[top]))
+        if len(frames)>REPLAY_FRAMES:
+            picks=sorted({round(k*(len(frames)-1)/(REPLAY_FRAMES-1)) for k in range(REPLAY_FRAMES)})
+            frames[:]=[frames[k] for k in picks]
+        def cells_of(assignment):
+            letters=['']*len(p['cells'])
+            for i,v in cell_var.items(): letters[i]=assignment[v]
+            return letters
+        result['replay']=[dict(seconds=round(t,2),score=round(score,3),letters=cells_of(a),numberMargins=number_margins(a))
+                          for t,a,score in frames]
     result['stats'].update(nodes=iterations,restarts=restarts,polishedRuns=polished,minimumNumbersDifferent=spread,elapsedSeconds=round(time.monotonic()-started,3),solutionLimit=MAX_SOLUTIONS)
     result['wordCandidates']=[dict(cells=s['cells'],direction=s['direction'],candidates=list(dict.fromkeys(solution['words'][j]['text'] for solution in result['solutions'])),partial=s['before'] or s['after'],verified=False) for j,s in enumerate(slots)]
     if stopped_status:

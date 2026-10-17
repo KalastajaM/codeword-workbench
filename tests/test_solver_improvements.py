@@ -214,6 +214,21 @@ class ImprovementsTests(unittest.TestCase):
                 self.assertGreaterEqual(info['margin'],0)
                 self.assertNotEqual(info['alternative'],s['letters'][[c['number'] for c in p['cells']].index(number)])
 
+    def test_dictionary_free_result_records_a_replay_ending_on_the_top_alternative(self):
+        p=puzzle(10,10,[i%26+1 for i in range(100)],useDictionary=False)
+        with patch('app.solver.MAX_SECONDS',.6): r=solve(p,[])
+        replay=r['replay']
+        self.assertTrue(2<=len(replay)<=solver.REPLAY_FRAMES)
+        self.assertEqual(replay[-1]['letters'],r['solutions'][0]['letters'])
+        self.assertEqual([f['seconds'] for f in replay],sorted(f['seconds'] for f in replay))
+        self.assertEqual([f['score'] for f in replay],sorted(f['score'] for f in replay),'Each step improves the score')
+        for frame in replay:
+            self.assertEqual(len(frame['letters']),len(p['cells']))
+            self.assertTrue(frame['numberMargins'])
+        with patch('app.solver.MAX_SECONDS',.6), patch('app.solver.REPLAY_FRAMES',3): short=solve(p,[])
+        self.assertLessEqual(len(short['replay']),3)
+        self.assertEqual(short['replay'][-1]['letters'],short['solutions'][0]['letters'])
+
     def test_dictionary_free_progress_streams_best_mapping(self):
         p=puzzle(10,10,[i%26+1 for i in range(100)],useDictionary=False)
         events=[]
