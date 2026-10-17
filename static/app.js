@@ -11,7 +11,13 @@ const acceptanceHistory=PuzzleState.acceptanceHistory();
 let wordDirection='Across',lastClickedCell=null;
 let candidateKeys=new Set(),candidateResult=null,candidateBusy=false,candidateRequest=0;
 let solvedWordFilter='all',solvedWordSort='uncertain';
-function notify(message,error=false){$('notice').textContent=message;$('notice').classList.toggle('error',error);$('notice').hidden=false;}
+function notify(message,error=false){$('notice-text').textContent=message;$('notice').classList.toggle('error',error);$('notice').hidden=false;}
+$('notice-close').onclick=()=>{$('notice').hidden=true;};
+// Getting started card: remember per browser whether it is collapsed.
+const introCollapsedKey='codeword-workbench.intro-collapsed';
+function setIntroCollapsed(collapsed){$('intro-card').classList.toggle('collapsed',collapsed);$('intro-toggle').setAttribute('aria-expanded',String(!collapsed));}
+try{setIntroCollapsed(localStorage.getItem(introCollapsedKey)==='1');}catch{}
+$('intro-toggle').onclick=()=>{const collapsed=!$('intro-card').classList.contains('collapsed');setIntroCollapsed(collapsed);try{localStorage.setItem(introCollapsedKey,collapsed?'1':'0');}catch{}};
 let confirmPending=null;
 function confirmAction(message,title="Replace current work?",labels={}){
  if(confirmPending)return Promise.resolve(false);
@@ -462,7 +468,7 @@ function updateView(){
  const baseWidth=puzzle.image?puzzle.cols*46/bounds.width:puzzle.cols*47+3;
  const ratio=puzzle.image?(image.naturalWidth?image.naturalHeight/image.naturalWidth:1):(puzzle.rows*47+3)/baseWidth;
  // While straightening, leave room around the photo for handles placed just outside it.
- const room=straightenHandles?80:0,availableWidth=Math.max(1,viewport.clientWidth-22-room),headerHeight=document.querySelector('header').offsetHeight,availableHeight=Math.max(120,Math.min((window.innerHeight-headerHeight)*.78-42,window.innerHeight-Math.max(headerHeight,viewport.getBoundingClientRect().top)-60)-room);
+ const room=straightenHandles?80:0,availableWidth=Math.max(1,viewport.clientWidth-22-room),headerHeight=$('top-bar').offsetHeight,availableHeight=Math.max(120,Math.min((window.innerHeight-headerHeight)*.78-42,window.innerHeight-Math.max(headerHeight,viewport.getBoundingClientRect().top)-60)-room);
  if(fitMode)viewScale=PuzzleState.fitScale(baseWidth,baseWidth*ratio,availableWidth,availableHeight,fitMode);
  if(puzzle.image){stage.style.width=baseWidth*viewScale+'px';stage.style.setProperty('--image-letter-size',Math.max(6,23*viewScale)+'px');stage.style.setProperty('--image-number-size',Math.max(4,10*viewScale)+'px');}
  else{stage.style.width='';stage.style.setProperty('--cell',46*viewScale+'px');stage.style.setProperty('--view-scale',viewScale);}
@@ -473,7 +479,7 @@ $('zoom-in').onclick=()=>zoomTo(viewScale*1.25);$('zoom-out').onclick=()=>zoomTo
 $('zoom-range').oninput=()=>zoomTo(Number($('zoom-range').value)/100);
 for(const mode of ['puzzle','height','width'])$('fit-'+mode).onclick=()=>{fitMode=mode;updateView();$('board-viewport').scrollTop=0;$('board-viewport').scrollLeft=0;};
 $('puzzle-image').onload=()=>updateView();window.addEventListener('resize',()=>updateView());
-new ResizeObserver(([entry])=>document.documentElement.style.setProperty('--header-height',entry.target.offsetHeight+'px')).observe(document.querySelector('header'));
+new ResizeObserver(([entry])=>document.documentElement.style.setProperty('--header-height',entry.target.offsetHeight+'px')).observe($('top-bar'));
 let viewFrame=0;window.addEventListener('scroll',()=>{if(!fitMode||viewFrame)return;viewFrame=requestAnimationFrame(()=>{viewFrame=0;updateView();});},{passive:true});
 
 let pendingLetterConflict=null;
