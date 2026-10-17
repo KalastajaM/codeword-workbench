@@ -11,8 +11,11 @@ const acceptanceHistory=PuzzleState.acceptanceHistory();
 let wordDirection='Across',lastClickedCell=null;
 let candidateKeys=new Set(),candidateResult=null,candidateBusy=false,candidateRequest=0;
 let solvedWordFilter='all',solvedWordSort='uncertain';
-function notify(message,error=false){$('notice-text').textContent=message;$('notice').classList.toggle('error',error);$('notice').hidden=false;}
-$('notice-close').onclick=()=>{$('notice').hidden=true;};
+let noticeIsProgress=false,noticeDismissedDuringSearch=false;
+function notify(message,error=false){noticeIsProgress=false;noticeDismissedDuringSearch=false;$('notice-text').setAttribute('aria-live','polite');$('notice-text').textContent=message;$('notice').classList.toggle('error',error);$('notice').hidden=false;}
+// Search progress updates the message silently (screen readers hear the start and the result); once closed, it stays closed until the search ends.
+function progressNotice(message){noticeIsProgress=true;if(noticeDismissedDuringSearch)return;$('notice-text').setAttribute('aria-live','off');$('notice-text').textContent=message;$('notice').classList.remove('error');$('notice').hidden=false;}
+$('notice-close').onclick=()=>{$('notice').hidden=true;if(solveJob.running)noticeDismissedDuringSearch=true;};
 // Getting started card: remember per browser whether it is collapsed.
 const introCollapsedKey='codeword-workbench.intro-collapsed';
 function setIntroCollapsed(collapsed){$('intro-card').classList.toggle('collapsed',collapsed);$('intro-toggle').setAttribute('aria-expanded',String(!collapsed));}
@@ -561,10 +564,10 @@ function renderEditMode(){
 $('cell-clue').onchange=()=>{numericEntry=null;const c=puzzle.cells[selected];c.clue=$('cell-clue').checked;c.black=c.clue;if(c.black)c.highlight=false;c.number='';c.letter='';c.guess='';c.mappingAnchor=false;delete c.numberReview;invalidate();render();};$('cell-black').onchange=toggleBlack;$('cell-highlight').onchange=()=>{if(!editMode)return;const c=puzzle.cells[selected];if(c.black)return;c.highlight=$('cell-highlight').checked;render();};$('cell-number').onchange=()=>{const number=$('cell-number').value.trim();if(number&&!/^[1-9][0-9]?$/.test(number)){notify('A number must be a positive integer from 1 to 99.',true);return renderInspector();}changeNumber(selected,number);render();};$('cell-letter').onchange=()=>{const letter=normalize($('cell-letter').value.trim());if(letter&&!new RegExp(PuzzleState.nordicLetters(puzzle.language)?'^[A-ZÅÄÖ]$':'^[A-Z]$').test(letter)){notify('Enter exactly one letter from the selected language alphabet.',true);return renderInspector();}editLetter(letter);render();};for(const[id,key]of Object.entries(flags))$(id).onchange=()=>{puzzle.cells[selected][key]=$(id).checked;invalidate();render();};$('accept-all').onclick=()=>accept(puzzle.cells.map((_,i)=>i));$('accept-deductions').onclick=()=>{const candidates=puzzle.cells.map((_,i)=>i).filter(i=>puzzle.suggestions?.forcedLetters?.[i]);accept(candidates);};$('alternatives').onchange=()=>{clearCandidateResults();solutionIndex=Number($('alternatives').value);render();};
 const solveJob=PuzzleState.solveRunner({
  request:api,
- onBusy:busy=>{$('solve').disabled=busy;$('solve').textContent=busy?'Solving…':'Solve puzzle →';$('cancel-solve').hidden=!busy;$('cancel-solve').disabled=false;$('cancel-solve').textContent='Cancel search';if(!busy&&stopSearchPrompt)$('confirm-dialog').close('cancel');},
- onStopping:stopping=>{$('cancel-solve').disabled=stopping;$('cancel-solve').textContent=stopping?'Stopping…':'Cancel search';if(stopping)$('solve-status').textContent='Stopping search and keeping its best provisional result…';},
+ onBusy:busy=>{$('solve').disabled=busy;$('solve').textContent=busy?'Solving…':'Solve puzzle →';$('cancel-solve').hidden=!busy;$('cancel-solve').disabled=false;$('cancel-solve').textContent='Cancel search';if(!busy&&stopSearchPrompt)$('confirm-dialog').close('cancel');if(!busy&&noticeIsProgress)notify('Search stopped before it finished. Its unfinished results were discarded.');},
+ onStopping:stopping=>{$('cancel-solve').disabled=stopping;$('cancel-solve').textContent=stopping?'Stopping…':'Cancel search';if(stopping)progressNotice('Stopping search and keeping its best provisional result…');},
  onUpdate:(state,stopping)=>{
-  if(state.status==='running'||state.status==='queued'){const preview=state.progress?.preview;$('solve-status').textContent=PuzzleState.solveProgressText(state.progress,stopping)+(preview?' · the grid shows the best unverified guess so far':'');const margins=state.progress?.previewMargins||null;if(Array.isArray(preview)&&preview.length===puzzle.cells.length&&(preview.join()!==livePreview?.join()||JSON.stringify(margins)!==JSON.stringify(livePreviewMargins))){livePreview=preview;livePreviewMargins=margins;renderGrid();}return;}
+  if(state.status==='running'||state.status==='queued'){const preview=state.progress?.preview;progressNotice(PuzzleState.solveProgressText(state.progress,stopping)+(preview?' · the grid shows the best unverified guess so far':''));const margins=state.progress?.previewMargins||null;if(Array.isArray(preview)&&preview.length===puzzle.cells.length&&(preview.join()!==livePreview?.join()||JSON.stringify(margins)!==JSON.stringify(livePreviewMargins))){livePreview=preview;livePreviewMargins=margins;renderGrid();}return;}
   if(livePreview){livePreview=null;livePreviewMargins=null;renderGrid();}
   if(state.status==='failed'){$('solve-status').textContent='Search failed: '+(state.error||'Unknown error');notify($('solve-status').textContent,true);return;}
   const result=state.result;
@@ -581,12 +584,12 @@ const solveJob=PuzzleState.solveRunner({
  onError:error=>{$('solve-status').textContent='Search failed: '+error.message;notify($('solve-status').textContent,true);},
  onCancelError:error=>notify('Could not confirm server cancellation: '+error.message+'. The search remains bounded by its time limit.',true)
 });
-$('solve').onclick=()=>{exitReplay();replay=null;replayFor=null;acceptanceHistory.clear();setUndoAvailable(false);clearCandidateResults();renderCandidatePanel();$('solve-status').textContent='Starting local search…';const {generated,...snapshot}=JSON.parse(JSON.stringify(puzzle));void solveJob.start(snapshot);};
+$('solve').onclick=()=>{exitReplay();replay=null;replayFor=null;acceptanceHistory.clear();setUndoAvailable(false);clearCandidateResults();renderCandidatePanel();$('solve-status').textContent='';notify('Starting local search…');noticeIsProgress=true;const {generated,...snapshot}=JSON.parse(JSON.stringify(puzzle));void solveJob.start(snapshot);};
 // Any change to the puzzle cancels a running search. While one runs, an input
 // that would change the puzzle asks first; if the user stops the search, the
 // input is then carried out. Safe controls never ask: they only view, zoom,
 // explain, look up, save or export, or edit text that is applied separately.
-const SEARCH_SAFE=['.help-button','[data-close]','#cancel-solve','#load','#saved-language','#saved-list .icon-button','#rename-dialog','#print-open','#print-dialog','#export','#save','#dictionary','#dictionary-query','#dictionary-filter','#dictionary-search','#dictionary-results-previous','#dictionary-results-next','#dictionary-previous','#dictionary-next','#dictionary-add-words','#dictionary-words','#dictionary-file','#signin-dialog','#confirm-dialog','#busy-dialog','#pdf-dialog','#letter-conflict-keep','#assign-number-letter','#assign-number-status','#name','#rows','#cols','#generate-starters','#generate-difficulty','#generate-include','#generate-unique','#replay-play','#replay-range','#replay-exit','#check-answers','#opacity','#straighten-photo','#straighten-detect','#straighten-cancel','#straighten-overlay','#edit-tool','#puzzle-tool','#zoom-out','#zoom-range','#zoom-in','#fit-puzzle','#fit-height','#fit-width','#number-position','#show-certainty','#add-current-word','#clear-candidate-selection','#find-candidates','#candidate-panel .icon-button','#lookup-query','#lookup-current','#lookup-clear','#lookup-run','#lookup-mappings','#alternatives','#solved-word-filter','#solved-word-sort','#retry-word-checks','.word-jump','#rule-out-letter'].join(',');
+const SEARCH_SAFE=['.help-button','[data-close]','#cancel-solve','#notice-close','#intro-toggle','#load','#saved-language','#saved-list .icon-button','#rename-dialog','#print-open','#print-dialog','#export','#save','#dictionary','#dictionary-query','#dictionary-filter','#dictionary-search','#dictionary-results-previous','#dictionary-results-next','#dictionary-previous','#dictionary-next','#dictionary-add-words','#dictionary-words','#dictionary-file','#signin-dialog','#confirm-dialog','#busy-dialog','#pdf-dialog','#letter-conflict-keep','#assign-number-letter','#assign-number-status','#name','#rows','#cols','#generate-starters','#generate-difficulty','#generate-include','#generate-unique','#replay-play','#replay-range','#replay-exit','#check-answers','#opacity','#straighten-photo','#straighten-detect','#straighten-cancel','#straighten-overlay','#edit-tool','#puzzle-tool','#zoom-out','#zoom-range','#zoom-in','#fit-puzzle','#fit-height','#fit-width','#number-position','#show-certainty','#add-current-word','#clear-candidate-selection','#find-candidates','#candidate-panel .icon-button','#lookup-query','#lookup-current','#lookup-clear','#lookup-run','#lookup-mappings','#alternatives','#solved-word-filter','#solved-word-sort','#retry-word-checks','.word-jump','#rule-out-letter'].join(',');
 let stopSearchPrompt=false,replayingInput=false;
 function controlKind(control){
  if(control.matches('select'))return 'select';
@@ -614,7 +617,7 @@ async function confirmStopSearch(event,control,grid){
  const stop=await confirmAction('A search is running. This change would stop it and discard its unfinished results.','Stop the search?',{confirm:'Stop search and continue',cancel:'Keep searching'});
  stopSearchPrompt=false;
  if(!stop||!solveJob.running)return;
- solveJob.cancel();$('solve-status').textContent='Search stopped before it finished. Its unfinished results were discarded.';
+ solveJob.cancel();
  if(livePreview){livePreview=null;livePreviewMargins=null;renderGrid();}
  replayInput(event,control,grid);
 }
