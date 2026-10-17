@@ -64,7 +64,7 @@ Keyboard controls: arrow keys select cells; digits enter a number and letters en
 
 Use **Fit puzzle** to fit both dimensions, **Fit height** to fill the available height, or **Fit width** to fill the available width. The single-dimension modes allow scrolling in the other direction. Use the zoom buttons/slider to enlarge details. Zoom changes only the view; image alignment and puzzle contents stay the same.
 
-The toolbar above the grid holds **Solve puzzle**, **Undo**, **Reset suggestions** and **Reset puzzle**. It stays just below the header while you scroll through a tall puzzle. **Reset suggestions** clears provisional suggestions, pencil marks, search results and undo history but keeps confirmed letters. **Reset puzzle** also clears answer letters, ruled-out letters and rejected words; in Puzzle mode it keeps prefilled letters. Neither reset changes a saved puzzle until you save.
+The toolbar above the grid holds the search time (**Quick**, **Deep** or **Extended**), **Solve puzzle**, **Undo**, **Reset suggestions** and **Reset puzzle**. While a search runs, **Cancel search** appears next to **Solve puzzle**. The **Solve puzzle** tooltip explains what the search does with missing words and its limits. Results appear under **Explore possibilities**. It stays just below the header while you scroll through a tall puzzle. **Reset suggestions** clears provisional suggestions, pencil marks, search results and undo history but keeps confirmed letters. **Reset puzzle** also clears answer letters, ruled-out letters and rejected words; in Puzzle mode it keeps prefilled letters. Neither reset changes a saved puzzle until you save.
 
 ## Edit and Puzzle modes
 
