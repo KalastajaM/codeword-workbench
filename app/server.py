@@ -148,6 +148,8 @@ def check_generated(generated, size, alphabet):
         raise ValueError('A generated answer needs one letter or blank and one number or blank per cell.')
     if type(generated.get('seed', 0)) is not int:
         raise ValueError('The generator seed must be a whole number.')
+    if generated.get('grade', 'easy') not in ('easy', 'medium', 'hard'):
+        raise ValueError('A generated difficulty is easy, medium or hard.')
 
 
 class PuzzleStore:
@@ -666,11 +668,11 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
                     puzzle = check_puzzle(self.payload())
                     self.send_data(202, jobs.start(puzzle, slots, partial(run_solve, words_dir=words_dir())))
                 elif method == 'POST' and path == '/api/generate-jobs':
-                    from .generator import layout, options as generator_options
+                    from .generator import prepare
                     payload = self.payload()
                     puzzle = check_puzzle(payload.get('puzzle'))
-                    options = generator_options(payload.get('options', {}))
-                    layout(puzzle)  # Report a grid that cannot be filled before starting a job.
+                    # Report a grid or word list that cannot work before starting a job.
+                    options = prepare(puzzle, payload.get('options', {}))[1]
                     self.send_data(202, jobs.start(puzzle, slots, partial(run_generate, options=options, words_dir=words_dir())))
                 elif method in ('GET', 'DELETE') and (path.startswith('/api/solve-jobs/') or path.startswith('/api/generate-jobs/')):
                     key = path.rsplit('/',1)[1]
