@@ -17,23 +17,18 @@ one cell, word or mapping at a time.
 - **Without a dictionary:** per-language letter-pattern models score whole
   letter mappings across all crossing words. In testing on several full-size
   printed puzzles, **Deep** search solved the grid with no word list
-<<<<<<< HEAD
-  installed; **Quick** search was not enough. Letters whose number could
-  take another letter at almost no cost are outlined, so you know where to
-  check first. The same models flag implausible words.
-- **Make your own puzzles:** draw a grid or ask for a number of words and
-  word lengths and let the app place the black cells, optionally fix some
-  numbers and letters or list words to include, and generate a codeword
-  filled from your word list. Choose Easy, Medium or Hard: the app grades the puzzle by solving
-  it step by step and gives letters until it fits, with only one answer.
-  Solve it in the app with an answer check, or print it with its number key
-  and solution.
-=======
   installed; **Quick** search was not enough. The grid shows the best guess
   live, shaded by how clearly each letter beats its best rival, so you know
   where to check first. Afterwards, a replay steps through how the grid
-  settled; with a dictionary, it shows words being placed instead. The same models flag implausible words.
->>>>>>> origin/main
+  settled; with a dictionary, it shows words being placed instead. The same
+  models flag implausible words.
+- **Make your own puzzles:** draw a grid, or set a number of words and word
+  lengths and let the app place the black cells; optionally fix some numbers
+  and letters or list words to include, and generate a codeword filled from
+  your word list. Choose Easy, Medium or Hard: the app grades the puzzle by
+  solving it step by step and gives letters until it fits, with only one
+  answer. Solve it in the app with an answer check, or print it with its
+  number key and solution.
 - **Honest output:** confirmed letters stay separate from suggestions, and
   every suggested word says what supports it.
 - **Local-first:** a Python standard-library server on 127.0.0.1; no
@@ -97,6 +92,11 @@ Quick: there, the letter model prefers the wrong letter, and only a word
 list settles it. These generated grids are easier than many printed
 puzzles: on real puzzles, Quick search without a dictionary was not enough
 in testing, so the app uses Deep when the dictionary is off.
+
+## Releases
+
+The current version is 1.0.0 (`python3 run.py --version`). Changes are
+listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Documentation
 
