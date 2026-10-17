@@ -13,9 +13,9 @@ let candidateKeys=new Set(),candidateResult=null,candidateBusy=false,candidateRe
 let solvedWordFilter='all',solvedWordSort='uncertain';
 let noticeIsProgress=false,noticeDismissedDuringSearch=false;
 function notify(message,error=false){noticeIsProgress=false;noticeDismissedDuringSearch=false;$('notice-text').setAttribute('aria-live','polite');$('notice-text').textContent=message;$('notice').classList.toggle('error',error);$('notice').hidden=false;}
-// Search progress updates the message silently (screen readers hear the start and the result); once closed, it stays closed until the search ends.
+// Search and generating progress update the message silently (screen readers hear the start and the result); once closed, it stays closed until the job ends.
 function progressNotice(message){noticeIsProgress=true;if(noticeDismissedDuringSearch)return;$('notice-text').setAttribute('aria-live','off');$('notice-text').textContent=message;$('notice').classList.remove('error');$('notice').hidden=false;}
-$('notice-close').onclick=()=>{$('notice').hidden=true;if(solveJob.running)noticeDismissedDuringSearch=true;};
+$('notice-close').onclick=()=>{$('notice').hidden=true;if(solveJob.running||generateJob.running)noticeDismissedDuringSearch=true;};
 // Getting started card: remember per browser whether it is collapsed.
 const introCollapsedKey='codeword-workbench.intro-collapsed';
 function setIntroCollapsed(collapsed){$('intro-card').classList.toggle('collapsed',collapsed);$('intro-toggle').setAttribute('aria-expanded',String(!collapsed));}
@@ -634,29 +634,28 @@ for(const type of ['click','mousedown','keydown','beforeinput','dragstart'])docu
 // letters and the solution sheet.
 const generateJob=PuzzleState.solveRunner({
  request:api,path:'/api/generate-jobs',
- onBusy:busy=>{$('generate').disabled=busy;$('generate').textContent=busy?'Generating…':'Generate puzzle';$('cancel-generate').hidden=!busy;$('cancel-generate').disabled=false;},
- onStopping:stopping=>{$('cancel-generate').disabled=stopping;if(stopping)$('generate-status').textContent='Stopping…';},
+ onBusy:busy=>{$('generate').disabled=busy;$('generate').textContent=busy?'Generating…':'Generate puzzle';$('cancel-generate').hidden=!busy;$('cancel-generate').disabled=false;if(!busy&&noticeIsProgress)notify('Generating stopped before it finished. The grid is unchanged.');},
+ onStopping:stopping=>{$('cancel-generate').disabled=stopping;if(stopping)progressNotice('Stopping generating…');},
  onUpdate:state=>{
-  if(state.status==='running'||state.status==='queued'){const p=state.progress||{};$('generate-status').textContent=p.stage==='layout'?`Placing black cells… ${Math.round(p.elapsedSeconds||0)} s`+(p.restarts?`, layout ${p.restarts+1}`:'')+'.':p.stage==='checking'||p.stage==='grading'?`${p.stage==='grading'?'Checking the difficulty':'Checking for other answers'}… ${Math.round(p.elapsedSeconds||0)} s.`:`Filling the grid… ${Math.round(p.elapsedSeconds||0)} s, ${(p.nodes||0).toLocaleString()} words tried`+(p.restarts?`, ${p.restarts} restart${p.restarts===1?'':'s'}`:'')+'.';return;}
+  if(state.status==='running'||state.status==='queued'){const p=state.progress||{};progressNotice(p.stage==='layout'?`Placing black cells… ${Math.round(p.elapsedSeconds||0)} s`+(p.restarts?`, layout ${p.restarts+1}`:'')+'.':p.stage==='checking'||p.stage==='grading'?`${p.stage==='grading'?'Checking the difficulty':'Checking for other answers'}… ${Math.round(p.elapsedSeconds||0)} s.`:`Filling the grid… ${Math.round(p.elapsedSeconds||0)} s, ${(p.nodes||0).toLocaleString()} words tried`+(p.restarts?`, ${p.restarts} restart${p.restarts===1?'':'s'}`:'')+'.');return;}
   if(state.status==='failed')throw new Error(state.error||'Generating failed.');
   const result=state.result||{},notes=(result.diagnostics||[]).join(' ');
   if(result.status!=='generated'){
    const reason=result.stats?.stopReason;
    const text=reason==='cancelled'?'Generating cancelled. The grid is unchanged.':reason==='search_exhausted'?'No fill exists: the search tried every option with the current dictionary. Change the black cells, the fixed letters or the dictionary.':'No fill found within the time limit. That does not mean none exists: try again, or add black cells to shorten long words.';
-   $('generate-status').textContent='';notify(text+(notes?' '+notes:''),reason!=='cancelled');return;
+   notify(text+(notes?' '+notes:''),reason!=='cancelled');return;
   }
   const source=generateSource;generateSource=null;
-  if(!source||source.puzzle!==puzzle||source.revision!==revision){$('generate-status').textContent='';notify('The grid changed while generating, so the result was not applied. Generate again.',true);return;}
+  if(!source||source.puzzle!==puzzle||source.revision!==revision){notify('The grid changed while generating, so the result was not applied. Generate again.',true);return;}
   const next=JSON.parse(JSON.stringify(puzzle));
   next.cells=next.cells.map((cell,i)=>({...PuzzleState.blankCell(),...(cell.highlight&&!result.cells[i].black?{highlight:true}:{}),...(cell.clue?{clue:true}:{}),...result.cells[i]}));
   next.generated={answer:result.answer,numbers:result.cells.map(c=>c.number),seed:result.stats.seed,...(result.grade?{grade:result.grade}:{})};
   delete next.suggestions;delete next.eliminations;delete next.rejectedWords;delete next.id;
   if(!next.name||next.name==='Untitled puzzle')next.name='Generated puzzle';
   setPuzzle(next,false);savedFingerprint='';
-  $('generate-status').textContent='';
   notify(`Puzzle generated and opened in Puzzle mode. ${PuzzleState.generatedSummary(result)}${notes?' '+notes:''} Use Print or image to print it.`);
  },
- onError:error=>{generateSource=null;$('generate-status').textContent='';notify('Generating failed: '+error.message,true);},
+ onError:error=>{generateSource=null;notify('Generating failed: '+error.message,true);},
  onCancelError:error=>notify('Could not confirm cancellation: '+error.message+'. Generating stops at its time limit.',true)
 });
 let generateSource=null;
@@ -670,7 +669,7 @@ $('generate').onclick=protect(async()=>{
  const {generated,suggestions,image,...grid}=JSON.parse(JSON.stringify(puzzle));
  // Only letters entered in Edit mode are fixed; answer letters are not.
  grid.cells=(layout?layoutBase(grid.cells):grid.cells).map(cell=>({...cell,letter:cell.prefilled?cell.letter:'',guess:''}));
- generateSource={puzzle,revision};$('generate-status').textContent='Starting…';
+ generateSource={puzzle,revision};notify('Generating puzzle…');noticeIsProgress=true;
  void generateJob.start({puzzle:grid,options:{starters,unique,difficulty,include,...(layout?{layout}:{})}});
 });
 $('cancel-generate').onclick=()=>generateJob.requestCancel();
