@@ -57,7 +57,7 @@ label.button{margin:0;font-size:inherit;color:var(--text)}
 .cell-entry-row>label{min-width:0}
 .cell-entry-row .confirmation-switch{height:40px;margin:12px 0}
 
-.legend .keyboard-help{flex-basis:100%;margin-left:0;display:block;text-align:left}
+
 
 /* Do not reserve a blank suggestion row below the selected-cell inputs. */
 #cell-suggestion{margin-bottom:0}
@@ -78,7 +78,7 @@ button.help-button:hover,button.help-button[aria-expanded=true]{color:var(--teal
 .control-help:has(>button[hidden]){display:none}
 .confirmation-help{align-self:end;margin-bottom:12px}
 .confirmation-help .confirmation-switch{margin-bottom:0}
-.keyboard-help{margin-top:14px;padding-top:10px}
+.board-actions{align-items:center;gap:8px;margin-top:14px}.board-actions>button{font-size:12px;padding:7px 10px}.board-actions .keyboard-caption{margin:0 0 0 auto}.keyboard-caption .hint{margin:0}
 @media(pointer:coarse){button.help-button{width:32px;height:32px;min-width:32px}}
 .cell-entry-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto}
 .cell-entry-row .confirmation-help{margin:0 0 12px}
