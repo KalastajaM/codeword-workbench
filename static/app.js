@@ -637,7 +637,7 @@ const generateJob=PuzzleState.solveRunner({
  onBusy:busy=>{$('generate').disabled=busy;$('generate').textContent=busy?'Generating…':'Generate puzzle';$('cancel-generate').hidden=!busy;$('cancel-generate').disabled=false;if(!busy&&noticeIsProgress)notify('Generating stopped before it finished. The grid is unchanged.');},
  onStopping:stopping=>{$('cancel-generate').disabled=stopping;if(stopping)progressNotice('Stopping generating…');},
  onUpdate:state=>{
-  if(state.status==='running'||state.status==='queued'){const p=state.progress||{};progressNotice(p.stage==='layout'?`Placing black cells… ${Math.round(p.elapsedSeconds||0)} s`+(p.restarts?`, layout ${p.restarts+1}`:'')+'.':p.stage==='checking'||p.stage==='grading'?`${p.stage==='grading'?'Checking the difficulty':'Checking for other answers'}… ${Math.round(p.elapsedSeconds||0)} s.`:`Filling the grid… ${Math.round(p.elapsedSeconds||0)} s, ${(p.nodes||0).toLocaleString()} words tried`+(p.restarts?`, ${p.restarts} restart${p.restarts===1?'':'s'}`:'')+'.');return;}
+  if(state.status==='running'||state.status==='queued'){const p=state.progress||{};progressNotice(p.stage==='checking'||p.stage==='grading'?`${p.stage==='grading'?'Checking the difficulty':'Checking for other answers'}… ${Math.round(p.elapsedSeconds||0)} s.`:`Filling the grid… ${Math.round(p.elapsedSeconds||0)} s, ${(p.nodes||0).toLocaleString()} words tried`+(p.restarts?`, ${p.restarts} restart${p.restarts===1?'':'s'}`:'')+'.');return;}
   if(state.status==='failed')throw new Error(state.error||'Generating failed.');
   const result=state.result||{},notes=(result.diagnostics||[]).join(' ');
   if(result.status!=='generated'){
@@ -660,7 +660,7 @@ const generateJob=PuzzleState.solveRunner({
 });
 let generateSource=null;
 $('generate').onclick=protect(async()=>{
- const starters=Number($('generate-starters').value),unique=$('generate-unique').checked,difficulty=$('generate-difficulty').value,layout=generateLayout();
+ const starters=Number($('generate-starters').value),unique=$('generate-unique').checked,difficulty=$('generate-difficulty').value;
  const include=$('generate-include').value.split(/[\s,;]+/).filter(Boolean);
  if(include.length>30)throw new Error('List up to 30 words to include.');
  if(!Number.isInteger(starters)||starters<0||starters>10)throw new Error('Starter letters must be a whole number from 0 to 10.');
@@ -668,9 +668,9 @@ $('generate').onclick=protect(async()=>{
  if(puzzle.cells.some(c=>!c.black&&!c.prefilled&&c.letter||c.guess)&&!await confirmAction('Generating replaces answer letters and suggestions. Letters entered in Edit mode are kept as given letters.','Generate a new puzzle?'))return;
  const {generated,suggestions,image,...grid}=JSON.parse(JSON.stringify(puzzle));
  // Only letters entered in Edit mode are fixed; answer letters are not.
- grid.cells=(layout?layoutBase(grid.cells):grid.cells).map(cell=>({...cell,letter:cell.prefilled?cell.letter:'',guess:''}));
+ grid.cells=grid.cells.map(cell=>({...cell,letter:cell.prefilled?cell.letter:'',guess:''}));
  generateSource={puzzle,revision};notify('Generating puzzle…');noticeIsProgress=true;
- void generateJob.start({puzzle:grid,options:{starters,unique,difficulty,include,...(layout?{layout}:{})}});
+ void generateJob.start({puzzle:grid,options:{starters,unique,difficulty,include}});
 });
 $('cancel-generate').onclick=()=>generateJob.requestCancel();
 // Each difficulty starts from its usual number of starter letters; Easy and
@@ -704,14 +704,7 @@ function renderLayout(){
  $('undo-layout').hidden=!placedCurrent();
  for(const id of ['layout-words','layout-shortest','layout-longest','layout-mirror','place-blocks'])$(id).disabled=!editMode;
 }
-for(const id of ['layout-words','layout-shortest','layout-longest'])$(id).onchange=protect(()=>{layoutTarget={};$('layout-status').textContent='';generateLayout();});
-// The target Generate should place black cells for, or null to keep the grid.
-function generateLayout(){
- if(!layoutTarget)return null;
- const target=readLayoutTarget(),placed=placedCurrent();
- if(!placed&&PuzzleState.meetsLayout(PuzzleState.layoutSummary(puzzle),target))return null;
- return {...target,mirror:$('layout-mirror').checked,...(placed?{current:puzzle.cells.map(c=>!!c.black)}:{})};
-}
+for(const id of ['layout-words','layout-shortest','layout-longest'])$(id).onchange=protect(()=>{layoutTarget={};$('layout-status').textContent='';readLayoutTarget();});
 // The grid without the black cells the app placed, so a new layout can move them.
 function layoutBase(cells){
  if(!placedCurrent())return cells;
