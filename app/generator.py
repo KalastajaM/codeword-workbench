@@ -18,6 +18,8 @@ words that only one dictionary word fits solve the whole grid. Medium: that
 also needs letters every fitting word agrees on. Hard: neither is enough.
 When a grid comes out harder than asked for, letters are given until it fits.
 Words the user asks for are placed before the rest of the grid is filled.
+Words the user typed in full stay where they are, even when the dictionary
+lacks them, and remain answers to solve; only lone typed letters are given.
 
 With a word layout target, black cells are placed first (grid_layout) and,
 when a layout does not fill in its share of the time, another is tried.
@@ -427,6 +429,23 @@ def included_words(puzzle, slots, include, target=None):
     return words
 
 
+def typed_words(puzzle, slots, include=()):
+    """Words typed in full into the grid, one per complete slot, or ValueError on a repeat.
+
+    They stay in place even when the dictionary lacks them. A generated puzzle
+    never repeats a word, so a typed word cannot be typed twice or also be listed
+    as a word to include.
+    """
+    cells = puzzle['cells']
+    words = [''.join(cells[i]['letter'] for i in slot) for slot in slots if all(cells[i].get('letter') for i in slot)]
+    for word in words:
+        if words.count(word) > 1:
+            raise ValueError(f'{word} is typed in the grid more than once, but a puzzle cannot repeat a word.')
+        if word in include:
+            raise ValueError(f'{word} is typed in the grid and also listed as a word to include, but a puzzle cannot repeat a word.')
+    return words
+
+
 def prepare(puzzle, raw):
     """Slots, checked options and normalized words to include; ValueError before any search.
 
@@ -447,6 +466,8 @@ def prepare(puzzle, raw):
     else:
         slots = layout(puzzle)
     checked['include'] = included_words(puzzle, slots, checked['include'], target)
+    if slots is not None:
+        typed_words(puzzle, slots, checked['include'])
     return slots, checked
 
 
@@ -634,11 +655,13 @@ def generate(puzzle, words, *, starters=2, seconds=DEFAULT_SECONDS, unique=True,
         lengths = {len(slot) for slot in slots}
     usable = {w for w in words if len(w) in lengths and set(w) <= alphabet}
     diagnostics = []
-    added = [word for word in include if word not in usable]
-    if added:
-        diagnostics.append(', '.join(added) + (' is not in the dictionary and counted as a word' if len(added) == 1 else
-                                               ' are not in the dictionary and counted as words') + ' for this puzzle only.')
-    usable = sorted(usable | set(include))
+    typed = typed_words(puzzle, slots) if slots is not None else []
+    for words_added, source in ((include, ''), (typed, ', typed in the grid,')):
+        added = [word for word in words_added if word not in usable]
+        if added:
+            diagnostics.append(', '.join(added) + source + (' is not in the dictionary and counted as a word' if len(added) == 1 else
+                                                            ' are not in the dictionary and counted as words') + ' for this puzzle only.')
+    usable = sorted(usable | set(include) | set(typed))
     stats = dict(seed=seed, dictionaryWords=len(usable), nodes=0, restarts=0, included=len(include), starters=starters)
     if target:
         letters, reason, puzzle, slots = _fill_layouts(puzzle, target, usable, include, rng, started + seconds,
@@ -653,7 +676,9 @@ def generate(puzzle, words, *, starters=2, seconds=DEFAULT_SECONDS, unique=True,
     stats['words'] = len(slots)
     cells = puzzle['cells']
     numbers = _numbering(cells, letters, rng)
-    fixed = {cell['letter'] for cell in cells if not cell.get('black') and cell.get('letter')}
+    # Typed letters are given, except in words typed in full: those stay answers to solve.
+    in_typed = {i for slot in slots if all(cells[i].get('letter') for i in slot) for i in slot}
+    fixed = {cell['letter'] for i, cell in enumerate(cells) if not cell.get('black') and cell.get('letter') and i not in in_typed}
     given = _starters(letters, fixed, starters, difficulty, rng)
     uniqueness, grade, extra = 'unchecked', None, 0
     checked_at = time.monotonic()
