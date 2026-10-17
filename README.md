@@ -17,12 +17,18 @@ one cell, word or mapping at a time.
 - **Without a dictionary:** per-language letter-pattern models score whole
   letter mappings across all crossing words. In testing on several full-size
   printed puzzles, **Deep** search solved the grid with no word list
+<<<<<<< HEAD
   installed; **Quick** search was not enough. Letters whose number could
   take another letter at almost no cost are outlined, so you know where to
   check first. The same models flag implausible words.
 - **Make your own puzzles:** draw a grid, optionally fix some numbers and
   letters, and generate a codeword filled from your word list. Solve it in the
   app with an answer check, or print it with its number key and solution.
+=======
+  installed; **Quick** search was not enough. The grid shows the best guess
+  live, shaded by how clearly each letter beats its best rival, so you know
+  where to check first. The same models flag implausible words.
+>>>>>>> origin/main
 - **Honest output:** confirmed letters stay separate from suggestions, and
   every suggested word says what supports it.
 - **Local-first:** a Python standard-library server on 127.0.0.1; no
@@ -66,20 +72,23 @@ scripts that convert them to the one-word-per-line import format.
 
 `scripts/benchmark_solver.py` solves five original 13 × 13 grids
 (`scripts/benchmark_puzzles.json`, the first is the showcase) under two
-number keys each, with no letters given. On a 4-core Linux container:
+number keys each, with no letters given. Each grid has exactly one fill
+within Webster's Second International; the generator rejects grids with
+more. On a 4-core Linux container:
 
 | Configuration | Grids fully right | Worst grid | Time |
 |---|---|---|---|
-| No dictionary, Quick | 6 of 10 | 97.4% of cells | 2.6 s (final answer first shown after 0.3 s) |
-| No dictionary, Deep | 6 of 10 | 97.4% of cells | 60 s |
-| Webster's 2nd (236,000 words), Quick or Deep | 8 of 10 | 97.4% of cells | about 1 s, including indexing |
+| No dictionary, Quick | 6 of 10 | 98.3% of cells | 2.9 s (final answer first shown after 0.4 s) |
+| No dictionary, Deep | 6 of 10 | 98.3% of cells | 60 s |
+| Webster's 2nd (236,000 words), Quick or Deep | 10 of 10 | 100% | about 1 s, including indexing |
 
-Every wrong cell in the dictionary-free runs was outlined as having a close
-rival. Grid 3 accounts for the worst result in every configuration: it has
-four valid fills (BAKING or WAKING, BENT, VENT or WENT, ROB or ROW), and
-the intended one ranks fourth. These generated grids are easier than many
-printed puzzles: on real puzzles, Quick search without a dictionary was not
-enough in testing, so the app uses Deep when the dictionary is off.
+Without a dictionary, the 6 wrong cells were all shaded coral (close
+rival); 22 cells were coral in total, and none of the 50 light-coral or
+1,060 unshaded cells was wrong. Deep search left the same cells wrong as
+Quick: there, the letter model prefers the wrong letter, and only a word
+list settles it. These generated grids are easier than many printed
+puzzles: on real puzzles, Quick search without a dictionary was not enough
+in testing, so the app uses Deep when the dictionary is off.
 
 ## Documentation
 
