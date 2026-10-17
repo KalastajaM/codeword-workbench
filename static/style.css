@@ -101,10 +101,13 @@ button.help-button:hover,button.help-button[aria-expanded=true]{color:var(--teal
 .map-assignment-letters{display:flex;gap:4px;flex-wrap:wrap;justify-content:center}
 .map-assignment-letters .provisional{color:var(--teal);font-style:italic}
 .board-panel{container-type:inline-size}
-.board-heading{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center}
-.board-heading .segmented{justify-self:end}
-#solve-grid{justify-self:center;font-size:12px}
-@container(max-width:430px){.board-heading{grid-template-columns:1fr auto}.board-heading .segmented{grid-column:2;grid-row:1}#solve-grid{grid-column:1/-1;grid-row:2}}
+/* Puzzle actions stay in view while the board scrolls; resets sit apart from Solve and Undo. */
+.board-heading{margin-bottom:12px}
+.board-toolbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;margin-bottom:12px;background:var(--panel);border-bottom:1px solid var(--line)}
+.board-toolbar button{font-size:12px;padding:7px 10px}
+.reset-actions{display:flex;gap:8px;margin-left:auto}
+.board-toolbar .reset-action{background:transparent;color:var(--muted)}
+.board-toolbar .reset-action:hover{background:#2a3c50;color:var(--text)}
 /* Compact assignment tiles communicate status through their letters, not extra rows. */
 .map-item{padding:0}
 .map-assign{min-height:54px;padding:7px 3px;font-size:10px;gap:4px}
