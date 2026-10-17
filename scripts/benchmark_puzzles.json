@@ -1,5 +1,5 @@
 {
- "note": "Original 13 x 13 grids built by scripts/build_sample_puzzle.py from common English words. The first is the in-app showcase.",
+ "note": "Original 13 x 13 grids built by scripts/build_sample_puzzle.py from common English words. The first is the in-app showcase. Each has exactly one fill within Webster's Second International (web2), checked with the strict dictionary search.",
  "puzzles": [
   {
    "name": "showcase",
@@ -43,38 +43,38 @@
    "name": "grid-3",
    "language": "en",
    "rows": [
-    "EARN#REPEATED",
-    "N#E###X#X#H#A",
-    "TEST#MAJORITY",
-    "I#E#R#M#T#S#S",
-    "REASON#DIS###",
-    "E#R#B#S#C#H#P",
-    "LUCK#NUT#HEAR",
-    "Y#H#A#R#T#R#E",
-    "###OFF#BAKING",
-    "M#P#F#S#X#T#N",
-    "ECONOMIC#DATA",
-    "S#P#R#G###G#N",
-    "SPENDING#WENT"
+    "SOON#COMMERCE",
+    "C#V###F#E#A#D",
+    "HEEL#OFFERING",
+    "E#R#M#I#T#L#E",
+    "DISTINCT#####",
+    "U#E#N#E#U#R#S",
+    "LEAGUE#SPHERE",
+    "E#S#S#F#S#S#A",
+    "#####GENEROUS",
+    "R#M#T#M#T#L#O",
+    "EVERYDAY#EVEN",
+    "A#T#P#L###E#A",
+    "DIABETES#IDOL"
    ]
   },
   {
    "name": "grid-4",
    "language": "en",
    "rows": [
-    "BALL#PERIODIC",
-    "A#I###M#N#R#O",
-    "BITE#EMISSION",
-    "Y#E###A#E#N#C",
-    "#######BROKER",
-    "S#R###M#T#I#E",
-    "UPON#CAN#UNIT",
-    "N#U#N#P###G#E",
-    "SELLER#######",
-    "H#E#A#P###G#S",
-    "INTERNAL#WEST",
-    "N#T#B#R###N#O",
-    "EVERYDAY#DEEP"
+    "POND#BEHAVIOR",
+    "I#O###C#N#S#A",
+    "LATE#CHECKOUT",
+    "L#E###O#H#L#I",
+    "#######POTATO",
+    "A#F###M#R#T#N",
+    "SPOT#NAM#BETA",
+    "B#O#N#C###D#L",
+    "EITHER#######",
+    "S#W#L#F###M#T",
+    "TREASURY#DEAR",
+    "O#A#O#E###S#O",
+    "STRANGER#BABY"
    ]
   },
   {

@@ -12,8 +12,8 @@ The word list is read for this run only and is not stored.
 Reported per mode: cells right in the top alternative (median and worst
 over all runs), grids solved completely, median seconds until the search
 stopped, median seconds until the grid preview first showed the final top
-answer (dictionary-free only), and how many wrong cells the close-rival
-marking flagged. Times depend on the machine; run nothing else meanwhile.
+answer (dictionary-free only), and how wrong and right cells fall into the
+certainty shading bands. Times depend on the machine; run nothing else meanwhile.
 """
 import argparse
 import json
@@ -25,7 +25,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from app.solver import solve, default_rules  # noqa: E402
+from app.solver import solve, default_rules, CLOSE_MARGIN, CLEAR_MARGIN  # noqa: E402
 from app.dictionaries import clean_words  # noqa: E402
 
 
@@ -52,10 +52,16 @@ def run(puzzle, answer, mode, words):
     top = result['solutions'][0]['letters'] if result['solutions'] else [''] * len(answer)
     wrong = [i for i in open_cells if top[i] != answer[i]]
     settled = next((t for t, preview in seen if preview == top), None) if seen else None
-    weak = (result['solutions'][0].get('weakNumbers') or {}) if result['solutions'] else {}
-    flagged = sum(1 for i in wrong if puzzle['cells'][i]['number'] in weak)
-    return dict(right=1 - len(wrong) / len(open_cells), wrong=len(wrong), seconds=elapsed, settled=settled,
-                flagged=flagged, weak=len(weak))
+    margins = (result['solutions'][0].get('numberMargins') or {}) if result['solutions'] else {}
+    def band(i):
+        info = margins.get(puzzle['cells'][i]['number'])
+        if info is None: return None
+        return 'close' if info['margin'] < CLOSE_MARGIN else 'moderate' if info['margin'] < CLEAR_MARGIN else 'clear'
+    bands = {}
+    for i in open_cells:
+        key = (band(i), i in wrong)
+        bands[key] = bands.get(key, 0) + 1
+    return dict(right=1 - len(wrong) / len(open_cells), wrong=len(wrong), seconds=elapsed, settled=settled, bands=bands)
 
 
 def summary(label, runs):
@@ -66,7 +72,14 @@ def summary(label, runs):
           f"solved {sum(r['wrong'] == 0 for r in runs)}/{len(runs)}  "
           f"stop {statistics.median(r['seconds'] for r in runs):5.1f}s  "
           + (f"settled {statistics.median(settled):5.1f}s  " if settled else '')
-          + (f"wrong cells flagged {sum(r['flagged'] for r in runs)}/{wrong}" if wrong else 'no wrong cells'))
+          + (f"wrong cells {wrong}" if wrong else 'no wrong cells'))
+    totals = {}
+    for r in runs:
+        for key, count in r['bands'].items(): totals[key] = totals.get(key, 0) + count
+    if totals:
+        print('    shading (wrong/all cells): ' + ', '.join(
+            f"{name} {totals.get((name, True), 0)}/{totals.get((name, True), 0) + totals.get((name, False), 0)}"
+            for name in ('close', 'moderate', 'clear')))
 
 
 def main():

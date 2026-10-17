@@ -204,18 +204,15 @@ class ImprovementsTests(unittest.TestCase):
         self.assertTrue(any('3 highest-scoring' in d for d in r['diagnostics']))
         self.assertTrue(all('rawScore' not in s for s in r['solutions']))
 
-    def test_dictionary_free_results_mark_numbers_with_close_rivals(self):
+    def test_dictionary_free_results_give_every_number_a_rival_margin(self):
         p=puzzle(2,3,[1,2,3,3,2,1],useDictionary=False)
         with patch('app.solver.MAX_NODES',3000): r=solve(p,[])
-        self.assertEqual(r['stats']['weakMargin'],solver.WEAK_MARGIN)
+        self.assertEqual((r['stats']['closeMargin'],r['stats']['clearMargin']),(solver.CLOSE_MARGIN,solver.CLEAR_MARGIN))
         for s in r['solutions']:
-            for number,info in s['weakNumbers'].items():
-                self.assertIn(number,{'1','2','3'})
-                self.assertLess(info['margin'],solver.WEAK_MARGIN)
+            self.assertEqual(set(s['numberMargins']),{'1','2','3'})
+            for number,info in s['numberMargins'].items():
                 self.assertGreaterEqual(info['margin'],0)
                 self.assertNotEqual(info['alternative'],s['letters'][[c['number'] for c in p['cells']].index(number)])
-        with patch('app.solver.WEAK_MARGIN',1e9), patch('app.solver.MAX_NODES',3000): wide=solve(p,[])
-        self.assertEqual(set(wide['solutions'][0]['weakNumbers']),{'1','2','3'},'Every movable number has a rival')
 
     def test_dictionary_free_progress_streams_best_mapping(self):
         p=puzzle(10,10,[i%26+1 for i in range(100)],useDictionary=False)
@@ -225,6 +222,11 @@ class ImprovementsTests(unittest.TestCase):
         self.assertTrue(previews)
         self.assertTrue(all(len(x)==len(p['cells']) and all(x) for x in previews))
         self.assertNotIn('preview',r)
+        self.assertNotIn('previewMargins',r)
+        margins=[e['previewMargins'] for e in events if e.get('previewMargins')]
+        self.assertTrue(margins,'The live preview carries certainty margins')
+        numbers={c['number'] for c in p['cells']}
+        self.assertTrue(all(set(m)<=numbers and all(v['margin']>=0 for v in m.values()) for m in margins))
 
     def test_dictionary_free_alternatives_are_distinct_local_optima(self):
         numbers={}; cells=[numbers.setdefault(ch,len(numbers)+1) for ch in 'HEARTEMBERABUSERESINTREND']
