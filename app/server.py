@@ -132,7 +132,22 @@ def check_puzzle(p):
         ocr.image_bounds(p['imageBounds'])
     if not isinstance(p.get('straightenedPhoto', False), bool):
         raise ValueError('straightenedPhoto must be true or false.')
+    if 'generated' in p:
+        check_generated(p['generated'], len(cells), alphabet)
     return p
+
+
+def check_generated(generated, size, alphabet):
+    """The answer and numbering kept with a generated puzzle, one entry per cell."""
+    if not isinstance(generated, dict):
+        raise ValueError('Generated puzzle details must be an object.')
+    answer, numbers = generated.get('answer'), generated.get('numbers')
+    if (not isinstance(answer, list) or not isinstance(numbers, list) or len(answer) != size or len(numbers) != size or
+            any(not isinstance(v, str) or (v and v not in alphabet) or len(v) > 1 for v in answer) or
+            any(not isinstance(v, str) or (v and not re.fullmatch(r'[1-9][0-9]?', v)) for v in numbers)):
+        raise ValueError('A generated answer needs one letter or blank and one number or blank per cell.')
+    if type(generated.get('seed', 0)) is not int:
+        raise ValueError('The generator seed must be a whole number.')
 
 
 class PuzzleStore:
@@ -428,6 +443,14 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
             result['diagnostics'].append('Local Finnish morphology index is unavailable; searched the word list only.')
         return result
 
+    def run_generate(puzzle, options, words_dir=data_dir, **job):
+        from .generator import generate
+        from .dictionaries import active_words
+        result = generate(puzzle, active_words(puzzle['language'], words_dir), **options, **job)
+        if not (Path(words_dir)/'dictionaries'/f"{puzzle['language']}.json").exists():
+            result['diagnostics'].append('Words come from the small bundled demonstration list. Import a dictionary for more varied puzzles.')
+        return result
+
     from .solve_jobs import SolveJobs, JobCapacityError
     jobs = SolveJobs(run_solve, expensive)
 
@@ -642,7 +665,14 @@ def make_server(port=8765, data_dir=None, *, host='127.0.0.1', public_origin=Non
                 elif method == 'POST' and path == '/api/solve-jobs':
                     puzzle = check_puzzle(self.payload())
                     self.send_data(202, jobs.start(puzzle, slots, partial(run_solve, words_dir=words_dir())))
-                elif method in ('GET', 'DELETE') and path.startswith('/api/solve-jobs/'):
+                elif method == 'POST' and path == '/api/generate-jobs':
+                    from .generator import layout, options as generator_options
+                    payload = self.payload()
+                    puzzle = check_puzzle(payload.get('puzzle'))
+                    options = generator_options(payload.get('options', {}))
+                    layout(puzzle)  # Report a grid that cannot be filled before starting a job.
+                    self.send_data(202, jobs.start(puzzle, slots, partial(run_generate, options=options, words_dir=words_dir())))
+                elif method in ('GET', 'DELETE') and (path.startswith('/api/solve-jobs/') or path.startswith('/api/generate-jobs/')):
                     key = path.rsplit('/',1)[1]
                     if not ID_RE.fullmatch(key):
                         raise ValueError('Invalid search job identifier.')

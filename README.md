@@ -17,9 +17,18 @@ one cell, word or mapping at a time.
 - **Without a dictionary:** per-language letter-pattern models score whole
   letter mappings across all crossing words. In testing on several full-size
   printed puzzles, **Deep** search solved the grid with no word list
+<<<<<<< HEAD
+  installed; **Quick** search was not enough. Letters whose number could
+  take another letter at almost no cost are outlined, so you know where to
+  check first. The same models flag implausible words.
+- **Make your own puzzles:** draw a grid, optionally fix some numbers and
+  letters, and generate a codeword filled from your word list. Solve it in the
+  app with an answer check, or print it with its number key and solution.
+=======
   installed; **Quick** search was not enough. The grid shows the best guess
   live, shaded by how clearly each letter beats its best rival, so you know
   where to check first. The same models flag implausible words.
+>>>>>>> origin/main
 - **Honest output:** confirmed letters stay separate from suggestions, and
   every suggested word says what supports it.
 - **Local-first:** a Python standard-library server on 127.0.0.1; no
@@ -97,11 +106,13 @@ in testing, so the app uses Deep when the dictionary is off.
 - `app/server.py`: localhost API, schema checks, persistence and static assets.
 - `app/solver.py`: validation and bounded constraint search.
 - `app/dictionaries.py`: demonstration and custom vocabularies.
+- `app/generator.py`: fills a drawn grid from the dictionary and numbers it.
 - `app/language_model.py`: character models, soft spelling rules and pattern
   checks; `app/models/` holds the bundled counts.
 - `app/ocr.py`, `app/number_reader.py`, `app/straighten.py`: image
   validation, Tesseract adapter, digit consensus and photo flattening.
-- `static/`: browser interface and pure state helpers; no build step.
+- `static/`: browser interface, pure state helpers and printable sheets
+  (`print.js`); no build step.
 - `scripts/`: dictionary conversion, model building, the showcase grid
   generator and benchmarks.
 

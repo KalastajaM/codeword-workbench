@@ -21,6 +21,24 @@ To create your own puzzle:
 
 The workspace is backed up automatically to `data/autosave.json` a moment after each change and restored when the page opens, so a reload or closed tab does not lose work. With changes that are not yet saved or exported, the browser asks before leaving the page. **Save** still keeps named puzzles.
 
+### Generate a puzzle from your own grid
+
+The app can fill a grid you draw and turn it into a codeword to solve here or print.
+
+1. Choose a language, set dimensions and choose **Create new grid**. Make cells black with Space or **Black / unusable**. Every letter cell must be part of a word of at least two cells, and word ends must stay closed.
+2. Optionally enter numbers and letters in Edit mode. They are kept: cells with the same number get the same letter, different numbers get different letters, and letters you enter are given in the finished puzzle.
+3. Set **Starter letters** (0 to 10, default 2): how many letters to give in addition to the ones you entered. A given letter shows in every cell with its number.
+4. Choose **Generate puzzle**. Every word is taken from the language dictionary and no word is used twice. The other cells are numbered so each letter has its own number, starting from the smallest numbers you did not use. The search tries random fills with restarts for up to 20 seconds and can be cancelled. It works on a drawn grid only, not on an imported image.
+5. The puzzle opens in **Puzzle** mode with the starter letters given. **Check my letters** compares the letters you have confirmed with the answer and outlines wrong ones in red. Suggestions are not checked. The answer is never written into the grid.
+
+The bundled demonstration lists are too small for most grids; import a dictionary first ([dictionaries.md](dictionaries.md)). The puzzle only uses words from that list, so names or rare words in it can appear. If no fill is found within the time limit, that does not mean none exists: try again, or add black cells to shorten long words. Only when the search has tried every option does it report that no fill exists with the current dictionary. The app does not check that the numbered grid has only one answer, so a solver may find a different valid fill.
+
+The answer and numbering are saved with the puzzle. They apply as long as the black cells and numbers are unchanged; after such an edit, **Check my letters** and the solution sheet are no longer offered.
+
+### Print or save as an image
+
+**Print or image** in the header previews the puzzle as a printable sheet: the grid with its numbers and the letters entered in Edit mode, a number key and an alphabet with the given letters crossed off. Answer letters and suggestions are left out. **Number key and alphabet** can be switched off. For a generated puzzle, **Solution sheet** adds a second sheet with every letter. **Print** prints the sheets on separate pages, **Save PNG** saves each sheet as an image at three times the preview size, and **Save SVG** saves scalable vector files. Everything is drawn in the browser.
+
 ### Hosted guest and user mode
 
 A hosted server ([railway.md](railway.md)) can start visitors in **guest mode**. The header shows the current mode. Guests can create, import, edit and solve puzzles, but nothing is saved on the server: **Save puzzle** and **Open** are hidden, and **Export JSON** and **Import JSON** keep copies. The automatic backup stays in this browser (IndexedDB), so a reload restores the workspace on the same device. Guests start with the bundled demonstration vocabularies, never the server's saved dictionaries. Dictionary imports and edits apply only to the current browser session, are limited to 200,000 words and 4 MB per list, and are removed after two hours without use or when the server restarts.
