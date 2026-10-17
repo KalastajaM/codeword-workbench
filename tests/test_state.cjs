@@ -631,6 +631,37 @@ test('Solve progress names preparation and says the search time starts after it'
  assert.equal(solveProgressText({stage:'missing_word_search',nodes:1200,elapsedSeconds:2,solutionsFound:1}), `missing word search · ${(1200).toLocaleString()} search nodes · 2.0 seconds · 1 suggestions found`);
  assert.equal(solveProgressText({stage:'missing_word_search'},true), 'Stopping search · 0.0 seconds');
 });
+test('Solve runner reports whether a search is running', async () => {
+ const {solveRunner}=require('../static/state.js');let release;
+ const runner=solveRunner({delay:async()=>{},request:async(path,body,method)=>{if(method==='POST')return {id:'job',status:'running'};if(method==='DELETE')return {status:'cancelled'};return new Promise(r=>release=r);}});
+ assert.equal(runner.running,false);
+ const started=runner.start({});
+ assert.equal(runner.running,true,'Running from the moment the search is requested');
+ runner.cancel();
+ assert.equal(runner.running,false,'Cancel ends the search at once');
+ release?.({status:'cancelled'});await started;
+ assert.equal(runner.running,false);
+});
+test('Only inputs that change the puzzle interrupt a running search', () => {
+ const {searchInterruption:stops}=require('../static/state.js');
+ assert.equal(stops({type:'click',kind:'button'}),true,'Buttons, checkboxes and file inputs ask first');
+ assert.equal(stops({type:'click',kind:'button',safe:true}),false,'Safe controls such as help, zoom and lookups never ask');
+ assert.equal(stops({type:'click',kind:'other'}),false);
+ assert.equal(stops({type:'click',kind:'text'}),false,'Clicking into a text field does not ask');
+ assert.equal(stops({type:'beforeinput',kind:'text'}),true,'Typing into a field that edits the puzzle asks');
+ assert.equal(stops({type:'beforeinput',kind:'number'}),true);
+ assert.equal(stops({type:'mousedown',kind:'select'}),true,'Opening a setting list asks');
+ assert.equal(stops({type:'mousedown',kind:'number'}),true,'Number spinners change the value without typing');
+ assert.equal(stops({type:'keydown',kind:'select',key:'ArrowDown'}),true,'Arrow keys change a focused list');
+ assert.equal(stops({type:'keydown',kind:'select',key:'Tab'}),false,'Moving focus away does not ask');
+ assert.equal(stops({type:'keydown',kind:'number',key:'ArrowUp'}),true);
+ assert.equal(stops({type:'keydown',kind:'text',key:'a'}),false,'Text is caught by beforeinput, not keydown');
+ assert.equal(stops({type:'dragstart',kind:'drag'}),true,'Dragging a mapping tile asks');
+ assert.equal(stops({type:'click',kind:'button',grid:true}),false,'Selecting a grid cell does not ask');
+ for(const key of ['ArrowLeft','ArrowDown','Tab','Enter','Shift'])assert.equal(stops({type:'keydown',key,grid:true}),false,`${key} moves around the grid`);
+ for(const key of ['a','7',' ','Backspace','Delete'])assert.equal(stops({type:'keydown',key,grid:true}),true,`${JSON.stringify(key)} edits the grid`);
+ assert.equal(stops({type:'keydown',key:'z',grid:true,modifier:true}),false,'Browser shortcuts are left alone');
+});
 test('App numbers move to the opposite corner only over an image', () => {
  const {displayNumberPosition} = require('../static/state.js');
  assert.equal(displayNumberPosition({numberPosition:'top-left'}), 'top-left');
