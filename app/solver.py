@@ -478,6 +478,20 @@ class _Control:
         self.progress = progress
         self.last_progress = -1.0
         self.stage = ''
+        # Thinned snapshots of a dictionary search, for replay: every
+        # stride-th event is kept; when the list fills, every other one is
+        # dropped and the stride doubles, so coverage stays even.
+        self.frames = []; self.stride = 1; self.events = 0
+        self.search_started = started
+
+    def record(self, kind, letters):
+        """letters: a list, or a function returning one (built only if kept)."""
+        event = self.events; self.events += 1
+        if event % self.stride: return
+        snapshot = list(letters() if callable(letters) else letters)
+        self.frames.append((time.monotonic()-self.search_started, snapshot, kind))
+        if len(self.frames) >= 4*REPLAY_FRAMES:
+            self.frames = self.frames[::2]; self.stride *= 2
 
     def check(self, stage=None, force=False):
         now = time.monotonic()
@@ -499,6 +513,7 @@ class _Control:
         if self.deadline == math.inf:
             now = time.monotonic()
             self.deadline = now + self.seconds
+            self.search_started = now
             self.result['stats']['preparationSeconds'] = round(now-self.started, 3)
 
 
@@ -639,6 +654,7 @@ def _constraint_search(p, slots, initial, base, rules, result, control, evidence
         if cannot_improve(letters, domains): continue
         propagated = _domain_propagation(p, slots, domains, letters, rules, control, optional)
         if propagated is None:
+            control.record('dead', letters)
             if not optional:
                 result.pop('partialLetters',None)
                 result['stats'].pop('partialSupportedCells',None)
@@ -646,6 +662,7 @@ def _constraint_search(p, slots, initial, base, rules, result, control, evidence
             continue
         letters, domains = propagated
         if cannot_improve(letters, domains): continue
+        control.record('step', letters)
         supported_cells = set()
         for j, slot in enumerate(slots):
             text = ''.join(letters[i] or '?' for i in slot['cells'])
@@ -692,6 +709,7 @@ def _constraint_search(p, slots, initial, base, rules, result, control, evidence
                 best_partial_rank=(-1,-1)
             queue(states); continue
         key = tuple(letters)
+        if key not in seen: control.record('solution', letters)
         if key not in seen:
             seen.add(key); solution_words = []
             for j, slot in enumerate(slots):
@@ -804,9 +822,11 @@ def _missing_word_search(p, slots, domains, evidence, base, rules, result, contr
             free = [q for q, k in enumerate(slot_keys[j]) if k[0] == 'n' and k not in assigned]
             options = sorted((w for w in open_[j] if not any(w[q] in owned for q in free)), key=ranks[j].get) + [None]
             frames.append([assigned, open_, cost, j, options, 0])
+            control.record('step', lambda: ['' if c.get('black') else assigned.get(keys[i], '') for i, c in enumerate(cells)])
             return
         letters = ['' if c.get('black') else assigned.get(keys[i], '') for i, c in enumerate(cells)]
         unresolved = sum(1 for i, c in enumerate(cells) if not c.get('black') and not letters[i])
+        control.record('partial' if unresolved else 'solution', letters)
         best_cost = min(best_cost, cost)
         best_seen = cost if best_seen is None else min(best_seen, cost)
         if unresolved:
@@ -853,6 +873,7 @@ def _missing_word_search(p, slots, domains, evidence, base, rules, result, contr
                 child = {**assigned, **changed}
                 reduced = reduce(child, rest, cost, changed)
                 if reduced is not None: push(child, *reduced)
+                else: control.record('dead', lambda: ['' if c.get('black') else child.get(keys[i], '') for i, c in enumerate(cells)])
             if next_cap is None:
                 # An exhausted tree leaves no better hypothesis in the candidates.
                 if best_seen is not None or best_cost >= len(slots): break
@@ -1096,6 +1117,16 @@ def _solve(puzzle, words, *, morphology=None, cancel=None, progress=None, models
                 if result['stats']['exhaustive'] else
                 f'More than {MAX_SOLUTIONS} solutions were found; these are the {MAX_SOLUTIONS} highest-scoring found before the search stopped.')
         result['solutions'].sort(key=lambda s:(-s.get('supportedWords',0),-s['score']))
+        if 'replay' not in result and control.frames:
+            # A dictionary search's replay: thinned steps, word placements, dead
+            # ends and complete grids, ending on the displayed result.
+            frames=control.frames
+            if len(frames)>REPLAY_FRAMES-1:
+                picks=sorted({round(k*(len(frames)-1)/(REPLAY_FRAMES-2)) for k in range(REPLAY_FRAMES-1)})
+                frames=[frames[k] for k in picks]
+            final=result['solutions'][0]['letters'] if result['solutions'] else result.get('partialLetters')
+            if final and frames[-1][1]!=final: frames=frames+[(time.monotonic()-control.search_started,list(final),'result')]
+            result['replay']=[dict(seconds=round(t,2),kind=kind,letters=letters) for t,letters,kind in frames]
         if result.get('partialLetters') and not result['solutions'] and not any('unresolved' in d for d in result['diagnostics']):
             result['diagnostics'].append('Partial letters are provisional search hypotheses; unknown-word cells remain unresolved and these are not forced deductions.')
         result['stats']['elapsedSeconds'] = round(time.monotonic()-started,3)
