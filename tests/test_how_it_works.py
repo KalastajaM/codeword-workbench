@@ -65,6 +65,7 @@ def expected_facts():
         'MIN_MAPPING_DISTANCE': solver.MIN_MAPPING_DISTANCE,
         'CLOSE_MARGIN': solver.CLOSE_MARGIN,
         'CLEAR_MARGIN': solver.CLEAR_MARGIN,
+        'REPLAY_FRAMES': solver.REPLAY_FRAMES,
         'MISSING_WORD_CANDIDATES': solver.MISSING_WORD_CANDIDATES,
         'MAX_FRAGMENTS': word_index.MAX_FRAGMENTS,
         'MAX_FRONTIER_CELLS': solver.MAX_FRONTIER_CELLS,

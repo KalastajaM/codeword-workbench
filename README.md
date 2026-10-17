@@ -27,7 +27,8 @@ one cell, word or mapping at a time.
 =======
   installed; **Quick** search was not enough. The grid shows the best guess
   live, shaded by how clearly each letter beats its best rival, so you know
-  where to check first. The same models flag implausible words.
+  where to check first. Afterwards, a replay steps through how the grid
+  settled. The same models flag implausible words.
 >>>>>>> origin/main
 - **Honest output:** confirmed letters stay separate from suggestions, and
   every suggested word says what supports it.
