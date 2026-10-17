@@ -631,3 +631,12 @@ test('Solve progress names preparation and says the search time starts after it'
  assert.equal(solveProgressText({stage:'missing_word_search',nodes:1200,elapsedSeconds:2,solutionsFound:1}), `missing word search · ${(1200).toLocaleString()} search nodes · 2.0 seconds · 1 suggestions found`);
  assert.equal(solveProgressText({stage:'missing_word_search'},true), 'Stopping search · 0.0 seconds');
 });
+test('App numbers move to the opposite corner only over an image', () => {
+ const {displayNumberPosition} = require('../static/state.js');
+ assert.equal(displayNumberPosition({numberPosition:'top-left'}), 'top-left');
+ assert.equal(displayNumberPosition({numberPosition:'bottom-right'}), 'bottom-right');
+ assert.equal(displayNumberPosition({numberPosition:'top-left', image:'data:x'}), 'bottom-right');
+ assert.equal(displayNumberPosition({numberPosition:'top-right', image:'data:x'}), 'bottom-left');
+ assert.equal(displayNumberPosition({numberPosition:'bottom-left', image:'data:x'}), 'top-right');
+ assert.equal(displayNumberPosition({numberPosition:'bogus', image:'data:x'}), 'bottom-right');
+});
