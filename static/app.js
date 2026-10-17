@@ -82,9 +82,9 @@ function isDeduction(i){const forced=puzzle.suggestions?.forcedLetters?.[i];retu
 function normalize(text){return text.normalize('NFC').toUpperCase();}
 function setPuzzle(value,editing=true){straightenHandles=null;clearLookup();if(typeof dictionaryEditor!=='undefined'){dictionaryEditor.cancel();$('dictionary-dialog').close();}wordDirection='Across';lastClickedCell=null;editMode=editing;clearCandidateResults(true);$('solve-status').textContent='';fitMode='width';acceptanceHistory.clear();numericEntry=null;puzzle=PuzzleState.canonicalPuzzle(value);PuzzleState.refreshDeductions(puzzle);selected=0;solutionIndex=0;solveJob.cancel();revision++;syncControls();render();validate();savedFingerprint=workspaceFingerprint();}
 function syncControls(){$('number-position').value=puzzle.numberPosition;$('search-mode').value=puzzle.searchMode;$('allow-unknown-words').checked=puzzle.allowUnknownWords;alignmentDirty=false;$('alignment-status').textContent='';for(const key of ['name','rows','cols','language'])$(key).value=puzzle[key];$('use-dictionary').checked=puzzle.useDictionary;$('capacity').value=puzzle.rules.maxLettersPerNumber;$('forbidden').value=puzzle.rules.forbiddenPatterns.join('\n');$('discouraged').value=puzzle.rules.discouragedPatterns.join('\n');const bounds=puzzle.imageBounds||{x:0,y:0,width:1,height:1};for(const key of ['x','y','width','height'])$('bound-'+key).value=Math.round(bounds[key]*1000)/10;}
-function render(){renderGrid();renderStraighten();renderInspector();renderMapping();renderResults();renderCandidatePanel();renderEditMode();}
-function renderGrid(){const grid=$('grid'), stage=$('board-stage'),image=$('puzzle-image');const weakAvailable=!showingPreview()&&!!puzzle.suggestions?.solutions?.[solutionIndex]?.weakNumbers;$('weak-controls').hidden=!weakAvailable;const weak=weakAvailable&&$('show-weak').checked?PuzzleState.weakLetters(puzzle,solutionIndex):null;$('review-legend').hidden=!puzzle.cells.some(c=>!c.black&&(c.numberReview==='check'&&c.number||c.numberReview==='missing'&&!c.number));grid.dataset.numberPosition=puzzle.numberPosition;grid.replaceChildren();grid.style.gridTemplateColumns=`repeat(${puzzle.cols}, 1fr)`;grid.style.gridTemplateRows=`repeat(${puzzle.rows}, 1fr)`;stage.classList.toggle('image-mode',!!puzzle.image);image.hidden=!puzzle.image;$('image-controls').hidden=!puzzle.image;$('grid-summary').textContent=`${puzzle.rows} × ${puzzle.cols} · ${PuzzleState.languagePresentation(puzzle).name} · ${puzzle.cells.filter(c=>!c.black&&c.letter).length} confirmed`;if(puzzle.image){if(image.src!==puzzle.image)image.src=puzzle.image;const b=puzzle.imageBounds||{x:0,y:0,width:1,height:1};Object.assign(grid.style,{left:b.x*100+'%',top:b.y*100+'%',width:b.width*100+'%',height:b.height*100+'%'});}else{stage.style.width='';for(const key of ['left','top','width','height'])grid.style[key]='';}
-puzzle.cells.forEach((cell,i)=>{const rival=weak?.[i];const button=document.createElement('button');button.className='cell'+(rival?' weak':'')+(cell.black?' black':'')+(cell.clue?' clue':'')+(cell.highlight?' highlight':'')+(selected===i?' selected':'');button.type='button';button.setAttribute('role','gridcell');button.setAttribute('aria-selected',String(selected===i));button.tabIndex=selected===i?0:-1;button.setAttribute('aria-label',`Row ${Math.floor(i/puzzle.cols)+1}, column ${i%puzzle.cols+1}, ${cell.clue?'image clue area':cell.black?'black':`number ${cell.number||'none'}${cell.numberReview==='check'&&cell.number?' (check recognition)':cell.numberReview==='missing'&&!cell.number?' (not recognized)':''}, ${cell.letter?'confirmed '+cell.letter:suggestion(i)?'suggested '+suggestion(i):'empty'}`}`);if(rival)button.setAttribute('aria-description',button.title=`Close rival: ${rival.alternative} for number ${rival.number} scores only ${rival.margin} lower`);if(!cell.black){const number=document.createElement('span'),review=cell.numberReview==='missing'&&!cell.number?'missing':cell.numberReview==='check'&&cell.number?'check':'';number.className='number'+(review?' review-'+review:'');number.textContent=review==='missing'?'?':cell.number;if(review)number.title=review==='missing'?'No number recognized here. Enter it from the image.':'Recognized number may be wrong. Check it against the image.';const letter=document.createElement('span');letter.className='letter'+(!cell.letter?(showingPreview()?' provisional live':isDeduction(i)?' deduction':' provisional'):'');letter.textContent=cell.letter||suggestion(i);button.append(number,letter);for(const [flag,side] of [['openBeforeAcross','left'],['openAfterAcross','right'],['openBeforeDown','top'],['openAfterDown','bottom']]){if(cell[flag]&&isEndpoint(i,side)){const mark=document.createElement('i');mark.className='boundary '+side;button.append(mark);}}}button.onclick=()=>{numericEntry=null;const word=PuzzleState.cellWord(puzzle,i,i===lastClickedCell?wordDirection:'Across',i===lastClickedCell,solutionIndex);selected=i;lastClickedCell=i;wordDirection=word?.direction||'Across';render(); $('grid').children[selected].focus();};button.onkeydown=e=>gridKey(e);grid.append(button);});renderWordHighlights();updateView();}
+function render(){renderGrid();renderStraighten();renderInspector();renderMapping();renderResults();renderCandidatePanel();renderEditMode();renderGenerated();}
+function renderGrid(){const grid=$('grid'), stage=$('board-stage'),image=$('puzzle-image');const weakAvailable=!showingPreview()&&!!puzzle.suggestions?.solutions?.[solutionIndex]?.weakNumbers;$('weak-controls').hidden=!weakAvailable;const weak=weakAvailable&&$('show-weak').checked?PuzzleState.weakLetters(puzzle,solutionIndex):null;const wrongLetters=currentAnswerMarks();$('review-legend').hidden=!puzzle.cells.some(c=>!c.black&&(c.numberReview==='check'&&c.number||c.numberReview==='missing'&&!c.number));grid.dataset.numberPosition=puzzle.numberPosition;grid.replaceChildren();grid.style.gridTemplateColumns=`repeat(${puzzle.cols}, 1fr)`;grid.style.gridTemplateRows=`repeat(${puzzle.rows}, 1fr)`;stage.classList.toggle('image-mode',!!puzzle.image);image.hidden=!puzzle.image;$('image-controls').hidden=!puzzle.image;$('grid-summary').textContent=`${puzzle.rows} × ${puzzle.cols} · ${PuzzleState.languagePresentation(puzzle).name} · ${puzzle.cells.filter(c=>!c.black&&c.letter).length} confirmed`;if(puzzle.image){if(image.src!==puzzle.image)image.src=puzzle.image;const b=puzzle.imageBounds||{x:0,y:0,width:1,height:1};Object.assign(grid.style,{left:b.x*100+'%',top:b.y*100+'%',width:b.width*100+'%',height:b.height*100+'%'});}else{stage.style.width='';for(const key of ['left','top','width','height'])grid.style[key]='';}
+puzzle.cells.forEach((cell,i)=>{const rival=weak?.[i];const button=document.createElement('button');button.className='cell'+(rival?' weak':'')+(wrongLetters?.has(i)?' wrong':'')+(cell.black?' black':'')+(cell.clue?' clue':'')+(cell.highlight?' highlight':'')+(selected===i?' selected':'');button.type='button';button.setAttribute('role','gridcell');button.setAttribute('aria-selected',String(selected===i));button.tabIndex=selected===i?0:-1;button.setAttribute('aria-label',`Row ${Math.floor(i/puzzle.cols)+1}, column ${i%puzzle.cols+1}, ${cell.clue?'image clue area':cell.black?'black':`number ${cell.number||'none'}${cell.numberReview==='check'&&cell.number?' (check recognition)':cell.numberReview==='missing'&&!cell.number?' (not recognized)':''}, ${cell.letter?'confirmed '+cell.letter:suggestion(i)?'suggested '+suggestion(i):'empty'}`}`);if(rival)button.setAttribute('aria-description',button.title=`Close rival: ${rival.alternative} for number ${rival.number} scores only ${rival.margin} lower`);if(!cell.black){const number=document.createElement('span'),review=cell.numberReview==='missing'&&!cell.number?'missing':cell.numberReview==='check'&&cell.number?'check':'';number.className='number'+(review?' review-'+review:'');number.textContent=review==='missing'?'?':cell.number;if(review)number.title=review==='missing'?'No number recognized here. Enter it from the image.':'Recognized number may be wrong. Check it against the image.';const letter=document.createElement('span');letter.className='letter'+(!cell.letter?(showingPreview()?' provisional live':isDeduction(i)?' deduction':' provisional'):'');letter.textContent=cell.letter||suggestion(i);button.append(number,letter);for(const [flag,side] of [['openBeforeAcross','left'],['openAfterAcross','right'],['openBeforeDown','top'],['openAfterDown','bottom']]){if(cell[flag]&&isEndpoint(i,side)){const mark=document.createElement('i');mark.className='boundary '+side;button.append(mark);}}}button.onclick=()=>{numericEntry=null;const word=PuzzleState.cellWord(puzzle,i,i===lastClickedCell?wordDirection:'Across',i===lastClickedCell,solutionIndex);selected=i;lastClickedCell=i;wordDirection=word?.direction||'Across';render(); $('grid').children[selected].focus();};button.onkeydown=e=>gridKey(e);grid.append(button);});renderWordHighlights();updateView();}
 function isEndpoint(i,side){const r=Math.floor(i/puzzle.cols),c=i%puzzle.cols;return side==='left'?(c===0||puzzle.cells[i-1].black):side==='right'?(c===puzzle.cols-1||puzzle.cells[i+1].black):side==='top'?(r===0||puzzle.cells[i-puzzle.cols].black):(r===puzzle.rows-1||puzzle.cells[i+puzzle.cols].black);}
 function renderInspector(){const c=puzzle.cells[selected];$('cell-position').textContent=`${Math.floor(selected/puzzle.cols)+1}, ${selected%puzzle.cols+1}`;$('cell-black').checked=c.black;$('cell-clue').checked=!!c.clue;$('cell-highlight').checked=!!c.highlight&&!c.black;$('cell-number').value=c.number;$('cell-letter').value=c.letter||suggestion(selected)||'';$('cell-number').disabled=c.black||!editMode;$('cell-letter').disabled=c.black||(!editMode&&c.prefilled);for(const [id,key]of Object.entries(flags)){$(id).checked=!!c[key];$(id).disabled=!editMode||c.black||!isEndpoint(selected,{'open-before-across':'left','open-after-across':'right','open-before-down':'top','open-after-down':'bottom'}[id]);}$('cell-suggestion').textContent=!c.letter&&suggestion(selected)?`${PuzzleState.suggestionLabel(puzzle,selected,solutionIndex)}: ${suggestion(selected)}`:'';$('cell-confirmed').checked=!!c.letter;$('cell-confirmed').disabled=c.black||(!c.letter&&!suggestion(selected))||(!editMode&&c.prefilled);renderCellRuledOut();}
 
@@ -489,8 +489,96 @@ const solveJob=PuzzleState.solveRunner({
  onError:error=>{$('solve-status').textContent='Search failed: '+error.message;notify($('solve-status').textContent,true);},
  onCancelError:error=>notify('Could not confirm server cancellation: '+error.message+'. The search remains bounded by its time limit.',true)
 });
-$('solve').onclick=()=>{acceptanceHistory.clear();$('undo-acceptance').disabled=true;clearCandidateResults();renderCandidatePanel();$('solve-status').textContent='Starting local search…';void solveJob.start(JSON.parse(JSON.stringify(puzzle)));};
+$('solve').onclick=()=>{acceptanceHistory.clear();$('undo-acceptance').disabled=true;clearCandidateResults();renderCandidatePanel();$('solve-status').textContent='Starting local search…';const {generated,...snapshot}=JSON.parse(JSON.stringify(puzzle));void solveJob.start(snapshot);};
 $('solve-grid').onclick=()=>$('solve').click();
+// Generating fills the drawn grid on the server and opens the result in
+// Puzzle mode. The answer stays out of the grid; it is used only by Check my
+// letters and the solution sheet.
+const generateJob=PuzzleState.solveRunner({
+ request:api,path:'/api/generate-jobs',
+ onBusy:busy=>{$('generate').disabled=busy;$('generate').textContent=busy?'Generating…':'Generate puzzle';$('cancel-generate').hidden=!busy;$('cancel-generate').disabled=false;},
+ onStopping:stopping=>{$('cancel-generate').disabled=stopping;if(stopping)$('generate-status').textContent='Stopping…';},
+ onUpdate:state=>{
+  if(state.status==='running'||state.status==='queued'){const p=state.progress||{};$('generate-status').textContent=`Filling the grid… ${Math.round(p.elapsedSeconds||0)} s, ${(p.nodes||0).toLocaleString()} words tried`+(p.restarts?`, ${p.restarts} restart${p.restarts===1?'':'s'}`:'')+'.';return;}
+  if(state.status==='failed')throw new Error(state.error||'Generating failed.');
+  const result=state.result||{},notes=(result.diagnostics||[]).join(' ');
+  if(result.status!=='generated'){
+   const reason=result.stats?.stopReason;
+   const text=reason==='cancelled'?'Generating cancelled. The grid is unchanged.':reason==='search_exhausted'?'No fill exists: the search tried every option with the current dictionary. Change the black cells, the fixed letters or the dictionary.':'No fill found within the time limit. That does not mean none exists: try again, or add black cells to shorten long words.';
+   $('generate-status').textContent=text+(notes?' '+notes:'');notify($('generate-status').textContent,reason!=='cancelled');return;
+  }
+  const source=generateSource;generateSource=null;
+  if(!source||source.puzzle!==puzzle||source.revision!==revision){$('generate-status').textContent='The grid changed while generating, so the result was not applied. Generate again.';return;}
+  const next=JSON.parse(JSON.stringify(puzzle));
+  next.cells=next.cells.map((cell,i)=>({...PuzzleState.blankCell(),...(cell.highlight?{highlight:true}:{}),...(cell.clue?{clue:true}:{}),...result.cells[i]}));
+  next.generated={answer:result.answer,numbers:result.cells.map(c=>c.number),seed:result.stats.seed};
+  delete next.suggestions;delete next.eliminations;delete next.rejectedWords;delete next.id;
+  if(!next.name||next.name==='Untitled puzzle')next.name='Generated puzzle';
+  setPuzzle(next,false);savedFingerprint='';
+  const words=result.stats.words,letters=result.stats.distinctLetters,given=result.givens.length;
+  $('generate-status').textContent=`Generated ${words} words using ${letters} letters, ${given} given (${result.givens.join(', ')||'none'}). The app has not checked that only one answer fits.`+(notes?' '+notes:'');
+  notify(`Puzzle generated and opened in Puzzle mode. ${$('generate-status').textContent} Use Print or image to print it.`);
+ },
+ onError:error=>{generateSource=null;$('generate-status').textContent='Generating failed: '+error.message;notify($('generate-status').textContent,true);},
+ onCancelError:error=>notify('Could not confirm cancellation: '+error.message+'. Generating stops at its time limit.',true)
+});
+let generateSource=null;
+$('generate').onclick=protect(async()=>{
+ const starters=Number($('generate-starters').value);
+ if(!Number.isInteger(starters)||starters<0||starters>10)throw new Error('Starter letters must be a whole number from 0 to 10.');
+ if(puzzle.image)throw new Error('Generating works on a drawn grid. Remove the image first, or create a new grid.');
+ if(puzzle.cells.some(c=>!c.black&&!c.prefilled&&c.letter||c.guess)&&!await confirmAction('Generating replaces answer letters and suggestions. Letters entered in Edit mode are kept as given letters.','Generate a new puzzle?'))return;
+ const {generated,suggestions,image,...grid}=JSON.parse(JSON.stringify(puzzle));
+ // Only letters entered in Edit mode are fixed; answer letters are not.
+ grid.cells=grid.cells.map(cell=>({...cell,letter:cell.prefilled?cell.letter:'',guess:''}));
+ generateSource={puzzle,revision};$('generate-status').textContent='Starting…';
+ void generateJob.start({puzzle:grid,options:{starters}});
+});
+$('cancel-generate').onclick=()=>generateJob.requestCancel();
+// Wrong letters from the last check, shown while the letters stay as checked.
+let answerMarks=null;
+const lettersKey=()=>puzzle.cells.map(c=>c.letter||'.').join('');
+function currentAnswerMarks(){return answerMarks&&answerMarks.puzzle===puzzle&&answerMarks.letters===lettersKey()?answerMarks.wrong:null;}
+function renderGenerated(){$('check-answers').hidden=!PuzzleState.generatedAnswer(puzzle);}
+$('check-answers').onclick=()=>{
+ const check=PuzzleState.answerCheck(puzzle);
+ if(!check)return notify('The black cells or numbers changed since generating, so the answer no longer applies.',true);
+ answerMarks={puzzle,letters:lettersKey(),wrong:new Set(check.wrong)};renderGrid();notify(PuzzleState.answerCheckText(check),!!check.wrong.length);
+};
+// Print sheets: the puzzle, and for a generated puzzle optionally its solution.
+function printSheets(){
+ const answer=PuzzleState.generatedAnswer(puzzle),key=$('print-key').checked;
+ const sheets=[PrintSheet.sheetSvg(puzzle,{key})];
+ if(answer&&$('print-solution').checked)sheets.push(PrintSheet.sheetSvg(puzzle,{key,solution:answer}));
+ return sheets;
+}
+function renderPrintPreview(){
+ const answer=PuzzleState.generatedAnswer(puzzle);
+ $('print-solution').disabled=!answer;if(!answer)$('print-solution').checked=false;
+ $('print-note').textContent=(answer?'':'A solution sheet is available for generated puzzles. ')+'The puzzle sheet shows numbers and letters entered in Edit mode; answer letters and suggestions are left out.';
+ $('print-preview').innerHTML=printSheets().join('');
+}
+$('print-open').onclick=()=>{renderPrintPreview();$('print-dialog').showModal();};
+for(const id of ['print-key','print-solution'])$(id).onchange=renderPrintPreview;
+const sheetFileName=suffix=>(puzzle.name||'puzzle').replace(/[^a-z0-9_-]/gi,'_')+suffix;
+function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+$('print-svg').onclick=()=>printSheets().forEach((svg,k)=>download(new Blob([svg],{type:'image/svg+xml'}),sheetFileName(k?'-solution.svg':'.svg')));
+$('print-png').onclick=protect(async()=>{
+ for(const [k,svg]of printSheets().entries()){
+  const url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml'}));
+  try{
+   const image=new Image();await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error('Could not draw the sheet.'));image.src=url;});
+   // Three times the SVG size: about 300 dpi for a 13 × 13 grid on A4.
+   const scale=3,canvas=document.createElement('canvas');canvas.width=image.width*scale;canvas.height=image.height*scale;
+   const context=canvas.getContext('2d');context.scale(scale,scale);context.drawImage(image,0,0);
+   const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!blob)throw new Error('Could not create the PNG.');
+   download(blob,sheetFileName(k?'-solution.png':'.png'));
+  }finally{URL.revokeObjectURL(url);}
+ }
+});
+$('print-run').onclick=()=>{$('print-sheet').innerHTML=printSheets().join('');$('print-dialog').close();document.body.classList.add('printing');window.print();};
+window.addEventListener('afterprint',()=>{document.body.classList.remove('printing');$('print-sheet').replaceChildren();});
+
 $('show-weak').onchange=()=>renderGrid();
 $('cancel-solve').onclick=()=>solveJob.requestCancel();
 $('search-mode').onchange=()=>{puzzle.searchMode=$('search-mode').value;invalidate();render();};

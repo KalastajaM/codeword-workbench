@@ -398,27 +398,48 @@ function solvedWordActions(puzzle,word,solutionIndex=0,editing=true){const confi
 function solvedWordPatternScore(word){if(['incomplete','queued','loading','error'].includes(word.assessmentStatus))return '';const score=word.plausibility?.bitsPerLetter;return Number.isFinite(score)?`Pattern score ${score.toFixed(2)}`:'Pattern score unavailable';}
 function wordEvidenceLabel(word){if(word.source==='fragment')return 'Dictionary fragment';if(word.source==='morphology')return 'Morphology match';if(word.source==='dictionary'&&word.verified)return 'Dictionary match';return 'Unverified';}
 // Each request has its own identity. Cancellation also handles an outstanding POST.
-function solveRunner({request,onUpdate=()=>{},onError=()=>{},onBusy=()=>{},onCancelError=()=>{},onStopping=()=>{},delay=()=>new Promise(resolve=>setTimeout(resolve,500))}){
+function solveRunner({request,path='/api/solve-jobs',onUpdate=()=>{},onError=()=>{},onBusy=()=>{},onCancelError=()=>{},onStopping=()=>{},delay=()=>new Promise(resolve=>setTimeout(resolve,500))}){
  let active=null;
- async function stop(job){if(!job.id||job.cancelSent)return;job.cancelSent=true;try{await request('/api/solve-jobs/'+encodeURIComponent(job.id),undefined,'DELETE');}catch(error){if(active===job){job.cancelSent=false;job.cancelRequested=false;onStopping(false);}onCancelError(error);}}
+ async function stop(job){if(!job.id||job.cancelSent)return;job.cancelSent=true;try{await request(path+'/'+encodeURIComponent(job.id),undefined,'DELETE');}catch(error){if(active===job){job.cancelSent=false;job.cancelRequested=false;onStopping(false);}onCancelError(error);}}
  function cancel(){if(!active)return;const job=active;active=null;job.cancelled=true;onBusy(false);void stop(job);}
  function requestCancel(){if(!active||active.cancelRequested)return;active.cancelRequested=true;onStopping(true);void stop(active);}
  async function start(snapshot){
   cancel();const job={id:null,cancelled:false,cancelSent:false,cancelRequested:false};active=job;onBusy(true);
   try{
-   let state=await request('/api/solve-jobs',snapshot,'POST');job.id=state.id;
+   let state=await request(path,snapshot,'POST');job.id=state.id;
    if(active!==job){await stop(job);return;}
    if(job.cancelRequested)await stop(job);
    while(active===job){
     onUpdate(state,job.cancelRequested);
     if(state.status!=='running'&&state.status!=='queued')break;
     await delay();if(active!==job)return;
-    state=await request('/api/solve-jobs/'+encodeURIComponent(job.id));
+    state=await request(path+'/'+encodeURIComponent(job.id));
    }
   }catch(error){if(active===job){await stop(job);if(active===job)onError(error);}}
   finally{if(active===job){active=null;onBusy(false);}}
  }
  return {start,cancel,requestCancel};
+}
+// A generated puzzle keeps its answer, letters per cell, for checking and
+// printing only. It applies while the black cells and numbers are unchanged.
+function generatedAnswer(puzzle){
+ const generated=puzzle?.generated;
+ if(!generated||!Array.isArray(generated.answer)||!Array.isArray(generated.numbers)||generated.answer.length!==puzzle.cells.length||generated.numbers.length!==puzzle.cells.length)return null;
+ const matches=puzzle.cells.every((cell,i)=>cell.black?!generated.answer[i]:!!generated.answer[i]&&String(cell.number||'')===generated.numbers[i]);
+ return matches?generated.answer:null;
+}
+// Confirmed letters against the answer. Suggestions are not counted.
+function answerCheck(puzzle){
+ const answer=generatedAnswer(puzzle);if(!answer)return null;
+ const wrong=[];let right=0,empty=0,total=0;
+ puzzle.cells.forEach((cell,i)=>{if(cell.black)return;total++;if(!cell.letter)empty++;else if(cell.letter===answer[i])right++;else wrong.push(i);});
+ return {right,wrong,empty,total,solved:right===total};
+}
+function answerCheckText(check){
+ if(check.solved)return `Solved: all ${check.total} letters match the answer.`;
+ const entered=check.total-check.empty,wrong=check.wrong.length;
+ if(!entered)return `No letters yet; ${check.total} cells to fill.`;
+ return `${entered} of ${check.total} cells filled: ${check.right} right, ${wrong} wrong${wrong?' (outlined in red)':''}. ${check.empty} cell${check.empty===1?'':'s'} still empty.`;
 }
 // Finnish and Swedish add Å, Ä and Ö to A–Z.
 function nordicLetters(language){return language==='fi'||language==='sv';}
@@ -516,5 +537,5 @@ function solveProgressText(progress,stopping){
  if(PREPARATION_STAGES.has(stage))return `Preparing: ${stage==='preparing'?'loading puzzle and dictionary':stage.replaceAll('_',' ')} · ${seconds} · search time starts after this`;
  return `${stage.replaceAll('_',' ')} · ${Number(p.nodes||0).toLocaleString()} search nodes · ${seconds} · ${Number(p.solutionsFound||0)} suggestions found`;
 }
-const helpers={weakLetters,savedPuzzleView,renumberCell,workspaceModeView,visibleRuledOut,numberIsOpen,canonicalEliminations,ruledOutLetters,setRuledOut,slotIdentity,rejectedWordsFor,setWordRejected,eliminationSuggestionGroups,wordAssessmentQueue,assessedWord,assessedWordLabel,displayedPuzzleWords,solvedWordActions,solvedWordEvidence,solvedWordsView,solvedWordSelection,solvedWordPatternScore,mappingCyclePlan,numberMovePlan,clearMappingProvenance,numberRemovalPlan,numberAssignmentPlan,dictionaryInputWords,dictionarySearchSummary,nordicLetters,completeWordText,selectedWordCheckText,patternScoreText,candidateEvidenceText,wordLookupText,lookupPattern,dictionaryPages,languagePresentation,dictionaryEditor,cellWord,letterOwners,moveLetterAssignment,resetSuggestions,editConfirmedLetter,cancelledResult,solveProgressText,solveStopExplanation,hasSolveProgress,mappingLetterInfo,changeMappingLetter,resetProgress,suggestionLabel,restoredWords,wordEvidenceLabel,plausibilityLabel,plausibilityDetail,candidateDisplay,solveRunner,canonicalPuzzle,slots,candidateLetters,matchesSlot,blankCell,numberEntry,imageBoundsFromPercent,fitScale,suggestedLetter,mappingDeductions,solveSummary,refreshDeductions,confirmCells,unconfirmCells,numberCells,undoConfirmation,acceptanceHistory,wordChoices,candidateSelection,candidateSearchPuzzle};if(typeof module!=='undefined'&&module.exports)module.exports=helpers;else root.PuzzleState=helpers;
+const helpers={generatedAnswer,answerCheck,answerCheckText,weakLetters,savedPuzzleView,renumberCell,workspaceModeView,visibleRuledOut,numberIsOpen,canonicalEliminations,ruledOutLetters,setRuledOut,slotIdentity,rejectedWordsFor,setWordRejected,eliminationSuggestionGroups,wordAssessmentQueue,assessedWord,assessedWordLabel,displayedPuzzleWords,solvedWordActions,solvedWordEvidence,solvedWordsView,solvedWordSelection,solvedWordPatternScore,mappingCyclePlan,numberMovePlan,clearMappingProvenance,numberRemovalPlan,numberAssignmentPlan,dictionaryInputWords,dictionarySearchSummary,nordicLetters,completeWordText,selectedWordCheckText,patternScoreText,candidateEvidenceText,wordLookupText,lookupPattern,dictionaryPages,languagePresentation,dictionaryEditor,cellWord,letterOwners,moveLetterAssignment,resetSuggestions,editConfirmedLetter,cancelledResult,solveProgressText,solveStopExplanation,hasSolveProgress,mappingLetterInfo,changeMappingLetter,resetProgress,suggestionLabel,restoredWords,wordEvidenceLabel,plausibilityLabel,plausibilityDetail,candidateDisplay,solveRunner,canonicalPuzzle,slots,candidateLetters,matchesSlot,blankCell,numberEntry,imageBoundsFromPercent,fitScale,suggestedLetter,mappingDeductions,solveSummary,refreshDeductions,confirmCells,unconfirmCells,numberCells,undoConfirmation,acceptanceHistory,wordChoices,candidateSelection,candidateSearchPuzzle};if(typeof module!=='undefined'&&module.exports)module.exports=helpers;else root.PuzzleState=helpers;
 })(typeof globalThis!=='undefined'?globalThis:this);

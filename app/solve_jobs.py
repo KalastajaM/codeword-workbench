@@ -43,8 +43,9 @@ class SolveJobs:
                        capacity=capacity, runner=runner or self.runner,
                        progress=dict(stage='preparing', nodes=0, elapsedSeconds=0, solutionsFound=0))
             self.jobs[key] = job
-            # Avoid retaining source images or previous solve results in the worker.
-            request = {k:v for k,v in puzzle.items() if k not in ('image','suggestions')}
+            # Avoid retaining source images or previous solve results in the worker;
+            # a generated puzzle's answer never reaches the solver.
+            request = {k:v for k,v in puzzle.items() if k not in ('image','suggestions','generated')}
             job['thread'] = threading.Thread(target=self._run, args=(job,request), daemon=True)
             try:
                 job['thread'].start()
