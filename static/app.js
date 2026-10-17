@@ -462,7 +462,7 @@ function updateView(){
  const baseWidth=puzzle.image?puzzle.cols*46/bounds.width:puzzle.cols*47+3;
  const ratio=puzzle.image?(image.naturalWidth?image.naturalHeight/image.naturalWidth:1):(puzzle.rows*47+3)/baseWidth;
  // While straightening, leave room around the photo for handles placed just outside it.
- const room=straightenHandles?80:0,availableWidth=Math.max(1,viewport.clientWidth-22-room),availableHeight=Math.max(120,Math.min(window.innerHeight*.78-42,window.innerHeight-Math.max(0,viewport.getBoundingClientRect().top)-60)-room);
+ const room=straightenHandles?80:0,availableWidth=Math.max(1,viewport.clientWidth-22-room),headerHeight=document.querySelector('header').offsetHeight,availableHeight=Math.max(120,Math.min((window.innerHeight-headerHeight)*.78-42,window.innerHeight-Math.max(headerHeight,viewport.getBoundingClientRect().top)-60)-room);
  if(fitMode)viewScale=PuzzleState.fitScale(baseWidth,baseWidth*ratio,availableWidth,availableHeight,fitMode);
  if(puzzle.image){stage.style.width=baseWidth*viewScale+'px';stage.style.setProperty('--image-letter-size',Math.max(6,23*viewScale)+'px');stage.style.setProperty('--image-number-size',Math.max(4,10*viewScale)+'px');}
  else{stage.style.width='';stage.style.setProperty('--cell',46*viewScale+'px');stage.style.setProperty('--view-scale',viewScale);}
@@ -473,6 +473,7 @@ $('zoom-in').onclick=()=>zoomTo(viewScale*1.25);$('zoom-out').onclick=()=>zoomTo
 $('zoom-range').oninput=()=>zoomTo(Number($('zoom-range').value)/100);
 for(const mode of ['puzzle','height','width'])$('fit-'+mode).onclick=()=>{fitMode=mode;updateView();$('board-viewport').scrollTop=0;$('board-viewport').scrollLeft=0;};
 $('puzzle-image').onload=()=>updateView();window.addEventListener('resize',()=>updateView());
+new ResizeObserver(([entry])=>document.documentElement.style.setProperty('--header-height',entry.target.offsetHeight+'px')).observe(document.querySelector('header'));
 let viewFrame=0;window.addEventListener('scroll',()=>{if(!fitMode||viewFrame)return;viewFrame=requestAnimationFrame(()=>{viewFrame=0;updateView();});},{passive:true});
 
 let pendingLetterConflict=null;
