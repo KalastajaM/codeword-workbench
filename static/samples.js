@@ -1,7 +1,10 @@
 /* Bundled sample puzzles. The showcase grid is original: built by
    scripts/build_sample_puzzle.py from common English words, then numbered
    with a fixed key. Its answer is kept so the app can report how many cells
-   a search got right; the answer never fills the grid by itself. */
+   a search got right; the answer never fills the grid by itself.
+   samples/showcase-en.png is print.js's puzzle sheet for SHOWCASE (with
+   the number key), rasterised at 3x and saved as greyscale PNG; at that
+   resolution recognition reads every number. */
 (function(root){
 'use strict';
 const SHOWCASE={

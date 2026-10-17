@@ -32,7 +32,7 @@ one cell, word or mapping at a time.
   installed; **Quick** search was not enough. The grid shows the best guess
   live, shaded by how clearly each letter beats its best rival, so you know
   where to check first. Afterwards, a replay steps through how the grid
-  settled. The same models flag implausible words.
+  settled; with a dictionary, it shows words being placed instead. The same models flag implausible words.
 >>>>>>> origin/main
 - **Honest output:** confirmed letters stay separate from suggestions, and
   every suggested word says what supports it.
@@ -47,11 +47,14 @@ Requires Python 3.10 or newer.
 python3 run.py
 ```
 
-Open <http://127.0.0.1:8765>, choose **Full-size showcase**, then **Solve
-puzzle**: an original 13 × 13 codeword with no letters given is solved
-without a dictionary, the grid shows the best guess while the search runs,
-and the app then reports how many cells match the known answer. **Try a small
-example** loads a 3 × 3 word square instead. Use `--port 8766` if the port is
+Open <http://127.0.0.1:8765> and choose **Watch it solve**: the app imports
+a sample printed page, reads its 13 × 13 grid and numbers, solves it without
+a dictionary, replays how the grid settled and reports how many cells match
+the known answer, with a caption for each step (about 30 seconds; with
+recognition unavailable it starts from the typed-in grid). **Full-size
+showcase** loads the same puzzle to solve yourself, **Try the sample page**
+(under Image or PDF) imports only the image, and **Try a small example** loads
+a 3 × 3 word square. Use `--port 8766` if the port is
 taken and `--data-dir /path` to keep data elsewhere. On macOS, `start.command` starts
 the server with a double-click.
 

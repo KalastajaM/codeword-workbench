@@ -129,7 +129,7 @@ ul{margin:0;padding-left:20px;display:grid;gap:6px;max-width:68ch}
         <span class="cond">Use dictionary on</span>
         <div class="stage"><b>Index the word list</b><small>Keeps only lengths the grid needs, then buckets words by length and by repeated-letter pattern. A slot numbered 4 9 9 4 only sees words shaped ABBA.</small><span class="fn">WordIndex</span></div>
         <div class="stage"><b>Collect candidates per slot</b><small>Words compatible with confirmed letters and mappings, plus Finnish inflected forms when enabled. Ranked by the letter model; the top <span data-fact="MAX_CANDIDATES">500</span> enter strict search.</small><span class="fn">index.candidates()</span></div>
-        <div class="stage"><b>Strict constraint search</b><small>Propagate crossings and shared numbers to a fixed point, branch on the slot with the fewest candidates, backtrack on contradictions. Keeps the <span data-fact="MAX_SOLUTIONS">12</span> highest-scoring alternatives and skips any branch whose best possible score cannot beat the weakest of them.</small><span class="fn">_constraint_search()</span></div>
+        <div class="stage"><b>Strict constraint search</b><small>Propagate crossings and shared numbers to a fixed point, branch on the slot with the fewest candidates, backtrack on contradictions. Word placements, dead ends and complete grids are recorded, thinned evenly, for replay. Keeps the <span data-fact="MAX_SOLUTIONS">12</span> highest-scoring alternatives and skips any branch whose best possible score cannot beat the weakest of them.</small><span class="fn">_constraint_search()</span></div>
       </div>
       <div class="lane" data-k="missing">
         <span class="cond">Allow missing words on, strict search found nothing</span>

@@ -229,6 +229,25 @@ class ImprovementsTests(unittest.TestCase):
         self.assertLessEqual(len(short['replay']),3)
         self.assertEqual(short['replay'][-1]['letters'],short['solutions'][0]['letters'])
 
+    def test_dictionary_search_records_a_replay_of_its_steps(self):
+        p=puzzle(3,3,[1,2,3,2,4,5,3,5,6],{0:'C'})
+        r=solve(p,['CAT','ATE','TEN','CAR','ARE','RED','TED','TAN','NET'])
+        replay=r['replay']
+        self.assertTrue(r['solutions'])
+        self.assertEqual(replay[-1]['letters'],r['solutions'][0]['letters'])
+        self.assertTrue({'step','solution'}<=({f['kind'] for f in replay}))
+        self.assertTrue(all(len(f['letters'])==9 and f['letters'][0]=='C' for f in replay))
+        self.assertEqual([f['seconds'] for f in replay],sorted(f['seconds'] for f in replay))
+
+    def test_dictionary_replay_is_thinned_evenly(self):
+        from app.solver import _Control
+        control=_Control(0,1,1,dict(stats=dict(nodes=0),solutions=[]),None,None)
+        for k in range(10000): control.record('step',[str(k)])
+        self.assertLess(len(control.frames),4*solver.REPLAY_FRAMES)
+        kept=[int(f[1][0]) for f in control.frames]
+        gaps={b-a for a,b in zip(kept,kept[1:])}
+        self.assertEqual(len(gaps),1,'Kept steps are evenly spaced')
+
     def test_dictionary_free_progress_streams_best_mapping(self):
         p=puzzle(10,10,[i%26+1 for i in range(100)],useDictionary=False)
         events=[]
