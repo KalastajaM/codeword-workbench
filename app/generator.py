@@ -639,7 +639,7 @@ def generate(puzzle, words, *, starters=2, seconds=DEFAULT_SECONDS, unique=True,
         diagnostics.append(', '.join(added) + (' is not in the dictionary and counted as a word' if len(added) == 1 else
                                                ' are not in the dictionary and counted as words') + ' for this puzzle only.')
     usable = sorted(usable | set(include))
-    stats = dict(seed=seed, dictionaryWords=len(usable), nodes=0, restarts=0, included=len(include))
+    stats = dict(seed=seed, dictionaryWords=len(usable), nodes=0, restarts=0, included=len(include), starters=starters)
     if target:
         letters, reason, puzzle, slots = _fill_layouts(puzzle, target, usable, include, rng, started + seconds,
                                                        cancel, progress, stats, diagnostics)
