@@ -22,8 +22,11 @@ one cell, word or mapping at a time.
   take another letter at almost no cost are outlined, so you know where to
   check first. The same models flag implausible words.
 - **Make your own puzzles:** draw a grid, optionally fix some numbers and
-  letters, and generate a codeword filled from your word list. Solve it in the
-  app with an answer check, or print it with its number key and solution.
+  letters or list words to include, and generate a codeword filled from your
+  word list. Choose Easy, Medium or Hard: the app grades the puzzle by solving
+  it step by step and gives letters until it fits, with only one answer.
+  Solve it in the app with an answer check, or print it with its number key
+  and solution.
 =======
   installed; **Quick** search was not enough. The grid shows the best guess
   live, shaded by how clearly each letter beats its best rival, so you know

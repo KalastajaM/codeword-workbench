@@ -499,7 +499,7 @@ const generateJob=PuzzleState.solveRunner({
  onBusy:busy=>{$('generate').disabled=busy;$('generate').textContent=busy?'Generating…':'Generate puzzle';$('cancel-generate').hidden=!busy;$('cancel-generate').disabled=false;},
  onStopping:stopping=>{$('cancel-generate').disabled=stopping;if(stopping)$('generate-status').textContent='Stopping…';},
  onUpdate:state=>{
-  if(state.status==='running'||state.status==='queued'){const p=state.progress||{};$('generate-status').textContent=`Filling the grid… ${Math.round(p.elapsedSeconds||0)} s, ${(p.nodes||0).toLocaleString()} words tried`+(p.restarts?`, ${p.restarts} restart${p.restarts===1?'':'s'}`:'')+'.';return;}
+  if(state.status==='running'||state.status==='queued'){const p=state.progress||{};$('generate-status').textContent=p.stage==='checking'||p.stage==='grading'?`${p.stage==='grading'?'Checking the difficulty':'Checking for other answers'}… ${Math.round(p.elapsedSeconds||0)} s.`:`Filling the grid… ${Math.round(p.elapsedSeconds||0)} s, ${(p.nodes||0).toLocaleString()} words tried`+(p.restarts?`, ${p.restarts} restart${p.restarts===1?'':'s'}`:'')+'.';return;}
   if(state.status==='failed')throw new Error(state.error||'Generating failed.');
   const result=state.result||{},notes=(result.diagnostics||[]).join(' ');
   if(result.status!=='generated'){
@@ -511,12 +511,11 @@ const generateJob=PuzzleState.solveRunner({
   if(!source||source.puzzle!==puzzle||source.revision!==revision){$('generate-status').textContent='The grid changed while generating, so the result was not applied. Generate again.';return;}
   const next=JSON.parse(JSON.stringify(puzzle));
   next.cells=next.cells.map((cell,i)=>({...PuzzleState.blankCell(),...(cell.highlight?{highlight:true}:{}),...(cell.clue?{clue:true}:{}),...result.cells[i]}));
-  next.generated={answer:result.answer,numbers:result.cells.map(c=>c.number),seed:result.stats.seed};
+  next.generated={answer:result.answer,numbers:result.cells.map(c=>c.number),seed:result.stats.seed,...(result.grade?{grade:result.grade}:{})};
   delete next.suggestions;delete next.eliminations;delete next.rejectedWords;delete next.id;
   if(!next.name||next.name==='Untitled puzzle')next.name='Generated puzzle';
   setPuzzle(next,false);savedFingerprint='';
-  const words=result.stats.words,letters=result.stats.distinctLetters,given=result.givens.length;
-  $('generate-status').textContent=`Generated ${words} words using ${letters} letters, ${given} given (${result.givens.join(', ')||'none'}). The app has not checked that only one answer fits.`+(notes?' '+notes:'');
+  $('generate-status').textContent=PuzzleState.generatedSummary(result)+(notes?' '+notes:'');
   notify(`Puzzle generated and opened in Puzzle mode. ${$('generate-status').textContent} Use Print or image to print it.`);
  },
  onError:error=>{generateSource=null;$('generate-status').textContent='Generating failed: '+error.message;notify($('generate-status').textContent,true);},
@@ -524,7 +523,9 @@ const generateJob=PuzzleState.solveRunner({
 });
 let generateSource=null;
 $('generate').onclick=protect(async()=>{
- const starters=Number($('generate-starters').value);
+ const starters=Number($('generate-starters').value),unique=$('generate-unique').checked,difficulty=$('generate-difficulty').value;
+ const include=$('generate-include').value.split(/[\s,;]+/).filter(Boolean);
+ if(include.length>30)throw new Error('List up to 30 words to include.');
  if(!Number.isInteger(starters)||starters<0||starters>10)throw new Error('Starter letters must be a whole number from 0 to 10.');
  if(puzzle.image)throw new Error('Generating works on a drawn grid. Remove the image first, or create a new grid.');
  if(puzzle.cells.some(c=>!c.black&&!c.prefilled&&c.letter||c.guess)&&!await confirmAction('Generating replaces answer letters and suggestions. Letters entered in Edit mode are kept as given letters.','Generate a new puzzle?'))return;
@@ -532,9 +533,14 @@ $('generate').onclick=protect(async()=>{
  // Only letters entered in Edit mode are fixed; answer letters are not.
  grid.cells=grid.cells.map(cell=>({...cell,letter:cell.prefilled?cell.letter:'',guess:''}));
  generateSource={puzzle,revision};$('generate-status').textContent='Starting…';
- void generateJob.start({puzzle:grid,options:{starters}});
+ void generateJob.start({puzzle:grid,options:{starters,unique,difficulty,include}});
 });
 $('cancel-generate').onclick=()=>generateJob.requestCancel();
+// Each difficulty starts from its usual number of starter letters; Easy and
+// Medium are solvable by deduction, which already means a single answer.
+function syncDifficulty(){const level=$('generate-difficulty').value;$('generate-unique').disabled=level!=='hard';if(level!=='hard')$('generate-unique').checked=true;}
+$('generate-difficulty').onchange=()=>{$('generate-starters').value={easy:3,medium:2,hard:1}[$('generate-difficulty').value];syncDifficulty();};
+syncDifficulty();
 // Wrong letters from the last check, shown while the letters stay as checked.
 let answerMarks=null;
 const lettersKey=()=>puzzle.cells.map(c=>c.letter||'.').join('');
@@ -548,8 +554,8 @@ $('check-answers').onclick=()=>{
 // Print sheets: the puzzle, and for a generated puzzle optionally its solution.
 function printSheets(){
  const answer=PuzzleState.generatedAnswer(puzzle),key=$('print-key').checked;
- const sheets=[PrintSheet.sheetSvg(puzzle,{key})];
- if(answer&&$('print-solution').checked)sheets.push(PrintSheet.sheetSvg(puzzle,{key,solution:answer}));
+ const grade=answer?puzzle.generated.grade:undefined,sheets=[PrintSheet.sheetSvg(puzzle,{key,grade})];
+ if(answer&&$('print-solution').checked)sheets.push(PrintSheet.sheetSvg(puzzle,{key,grade,solution:answer}));
  return sheets;
 }
 function renderPrintPreview(){
