@@ -23,7 +23,7 @@ label.button{margin:0;font-size:inherit;color:var(--text)}
 .cell.candidate-selected.selected::after{inset:3px}
 .legend .candidate-dot{background:#ffbb3e;border-radius:1px;width:9px;height:9px}
 
-.solve-actions,.search-options{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.search-options{margin-bottom:8px}.search-options label{margin:0}.word-row details{grid-column:1/-1;width:100%}
+.word-row details{grid-column:1/-1;width:100%}
 
 .unmatched-mapping{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
 .unmatched-mapping h3{margin-bottom:8px}
@@ -105,6 +105,7 @@ button.help-button:hover,button.help-button[aria-expanded=true]{color:var(--teal
 .board-heading{margin-bottom:12px}
 .board-toolbar{position:sticky;top:var(--header-height,0px);z-index:5;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;margin-bottom:12px;background:var(--panel);border-bottom:1px solid var(--line)}
 .board-toolbar button{font-size:12px;padding:7px 10px}
+.board-toolbar select{width:auto;margin:0;padding:6px 8px;font-size:12px}
 .reset-actions{display:flex;gap:8px;margin-left:auto}
 .board-toolbar .reset-action{background:transparent;color:var(--muted)}
 .board-toolbar .reset-action:hover{background:#2a3c50;color:var(--text)}

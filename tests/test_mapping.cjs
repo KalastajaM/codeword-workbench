@@ -43,13 +43,12 @@ test('Invalidating lookup releases disabled button and ignores old results',asyn
  const {$,pending,context}=lookupUI();$('lookup-query').value='CAT';const first=$('lookup-run').onclick();context.clearLookup();assert.equal($('lookup-run').disabled,false);
  pending[0]({kind:'word',word:'CAT'});await first;assert.equal($('lookup-status').textContent,'');assert.equal($('lookup-results').children.length,0);
 });
-test('Grid Solve forwards the original action and both buttons share solver busy state',()=>{
+test('Solve and Cancel share the solver busy state',()=>{
  const vm=require('node:vm'),fs=require('node:fs'),source=fs.readFileSync(require.resolve('../static/app.js'),'utf8');
- const nodes={},$=id=>nodes[id]??={disabled:false,textContent:'',click(){if(!this.disabled)this.onclick?.();}};let calls=0;$('solve').onclick=()=>calls++;
- vm.runInNewContext(source.match(/\$\('solve-grid'\)\.onclick=.*?;/)[0],{$});$('solve-grid').click();assert.equal(calls,1);
+ const nodes={},$=id=>nodes[id]??={disabled:false,hidden:true,textContent:'',click(){if(!this.disabled)this.onclick?.();}};let calls=0;$('solve').onclick=()=>calls++;
  const busyCode=source.match(/onBusy:busy=>(.*),\n onStopping:/)[1];const busy=vm.runInNewContext('(busy=>'+busyCode+')',{$,stopSearchPrompt:false});busy(true);
- assert.equal($('solve').disabled,true);assert.equal($('solve-grid').disabled,true);assert.equal($('solve-grid').textContent,$('solve').textContent);$('solve-grid').click();assert.equal(calls,1);
- busy(false);$('solve-grid').click();assert.equal(calls,2);
+ assert.equal($('solve').disabled,true);assert.equal($('solve').textContent,'Solving…');assert.equal($('cancel-solve').hidden,false);$('solve').click();assert.equal(calls,0);
+ busy(false);assert.equal($('solve').textContent,'Solve puzzle →');assert.equal($('cancel-solve').hidden,true);$('solve').click();assert.equal(calls,1);
 });
 test('Removing a pair preserves numbers, other variant letters and unrelated hypotheses; undo restores prefills',()=>{
  const p=make([{number:'1',letter:'A',prefilled:true},{number:'1',guess:'A'},{number:'1',letter:'B',prefilled:false},{number:'2',guess:'C'}],{maxLettersPerNumber:2});const before=JSON.stringify(p);
