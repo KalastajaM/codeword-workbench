@@ -79,8 +79,8 @@ more. On a 4-core Linux container:
 
 | Configuration | Grids fully right | Worst grid | Time |
 |---|---|---|---|
-| No dictionary, Quick | 6 of 10 | 98.3% of cells | 2.9 s (final answer first shown after 0.4 s) |
-| No dictionary, Deep | 6 of 10 | 98.3% of cells | 60 s |
+| No dictionary, Quick | 6 of 10 | 98.3% of cells | 2.1 s (final answer first shown after 0.2 s) |
+| No dictionary, Deep | 6 of 10 | 98.3% of cells | 51 s (stops at its node limit) |
 | Webster's 2nd (236,000 words), Quick or Deep | 10 of 10 | 100% | about 1 s, including indexing |
 
 Without a dictionary, the 6 wrong cells were all shaded coral (close
