@@ -1,9 +1,13 @@
 """Build an original codeword grid for the showcase sample.
 
-Usage: python3 scripts/build_sample_puzzle.py WORDS.txt [--seed N] [--size 13]
+Usage: python3 scripts/build_sample_puzzle.py WORDS.txt [--check-words BIG.txt] [--seed N] [--size 13]
 
 WORDS.txt is any one-word-per-line list; it is read only while building and
-is not stored. The grid follows the usual codeword layout: words run along
+is not stored. Each fill is numbered and solved with the app's strict
+dictionary search; a grid is kept only if exactly one fill fits and the
+search was exhaustive. Check against a broad list (--check-words, defaults to
+WORDS.txt): a grid unique among common words can still have other fills
+among all English words, which a solver may then prefer. The grid follows the usual codeword layout: words run along
 even rows and even columns, (odd, odd) cells are black, and extra black
 cells split long runs. The fill is a backtracking search, so the result is a
 new arrangement of common words. Prints the grid rows (# is black) and the
@@ -13,6 +17,11 @@ import argparse
 import random
 import sys
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app import solver  # noqa: E402
+from app.dictionaries import clean_words  # noqa: E402
 
 
 def pattern(size, rng, shortest=3, longest=8):
@@ -80,15 +89,38 @@ def fill(slots, words, rng, seconds):
         return None
 
 
+def read_words(path, longest=None):
+    words = {line.strip().upper() for line in open(path, encoding='utf-8')
+             if line.strip().isalpha() and line.strip().isascii() and len(line.strip()) >= 3}
+    return sorted(w for w in words if longest is None or len(w) <= longest)
+
+
+def solution_count(rows, words):
+    """Fills of the numbered grid within words, and whether the search was exhaustive."""
+    text = ''.join(rows)
+    key = {letter: str(k + 1) for k, letter in enumerate(sorted(set(text) - {'#'}))}
+    cells = [dict(black=ch == '#', number='' if ch == '#' else key[ch], letter='') for ch in text]
+    puzzle = dict(rows=len(rows), cols=len(rows[0]), language='en', rules=solver.default_rules('en'), cells=cells,
+                  useDictionary=True, allowUnknownWords=False, searchMode='extended')
+    limit = solver.MAX_CANDIDATES
+    solver.MAX_CANDIDATES = 10 ** 6  # every candidate, so an exhausted search proves uniqueness
+    try:
+        result = solver.solve(puzzle, clean_words('en', words))
+    finally:
+        solver.MAX_CANDIDATES = limit
+    return len(result['solutions']), result['stats']['exhaustive']
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('words')
     parser.add_argument('--seed', type=int, default=1)
     parser.add_argument('--size', type=int, default=13)
     parser.add_argument('--attempts', type=int, default=200)
+    parser.add_argument('--check-words', help='broad list for the uniqueness check (default: WORDS)')
     args = parser.parse_args()
-    words = sorted({line.strip().upper() for line in open(args.words, encoding='utf-8')
-                    if line.strip().isalpha() and line.strip().isascii() and 3 <= len(line.strip()) <= 8})
+    words = read_words(args.words, longest=8)
+    check = read_words(args.check_words) if args.check_words else words
     rng = random.Random(args.seed)
     for attempt in range(args.attempts):
         built = pattern(args.size, rng)
@@ -97,11 +129,15 @@ def main():
         letters = fill(slots, words, rng, 10)
         if not letters: continue
         rows = [''.join('#' if (r, c) in black else letters[(r, c)] for c in range(args.size)) for r in range(args.size)]
+        count, exhaustive = solution_count(rows, check)
+        if count != 1 or not exhaustive:
+            print(f'attempt {attempt}: rejected, {count} fills{"" if exhaustive else " (search not exhaustive)"}', file=sys.stderr)
+            continue
         distinct = len(set(''.join(rows)) - {'#'})
-        print(f'attempt {attempt}: {len(slots)} words, {distinct} distinct letters', file=sys.stderr)
+        print(f'attempt {attempt}: {len(slots)} words, {distinct} distinct letters, unique', file=sys.stderr)
         for row in rows: print(row)
         return
-    sys.exit('No fill found; try another seed or a larger word list.')
+    sys.exit('No unique fill found; try another seed or more attempts.')
 
 
 if __name__ == '__main__':
