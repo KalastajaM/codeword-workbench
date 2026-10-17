@@ -50,9 +50,72 @@ class LayoutTests(unittest.TestCase):
     def test_empty_grid_and_bad_options(self):
         with self.assertRaisesRegex(ValueError, 'at least one word'):
             layout(grid(['#.#']))
-        for bad in [dict(starters=11), dict(starters=True), dict(seconds=0), dict(seconds=True), dict(seed='1'), dict(unique=1), []]:
+        for bad in [dict(starters=11), dict(starters=True), dict(seconds=0), dict(seconds=True), dict(seed='1'), dict(unique=1),
+                    dict(difficulty='expert'), dict(include='CAT'), dict(include=['CAT'] * 31), dict(include=[3]), []]:
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 options(bad)
+
+
+class IncludeTests(unittest.TestCase):
+    def test_words_to_include_are_normalized_and_checked_against_the_grid(self):
+        from app.generator import prepare
+        p = grid(['....', '.#.#', '....'])
+        self.assertEqual(prepare(p, dict(include=[' cane ', 'CANE', 'ant', '']))[1]['include'], ['CANE', 'ANT'])
+        for words, message in [(['CANE1'], 'outside the selected language'), (['CANES'], 'only words of 3, 4 letters'),
+                               (['CANE', 'NOTE', 'TONE'], '3 words to include have 4 letters')]:
+            with self.subTest(words=words), self.assertRaisesRegex(ValueError, message):
+                prepare(p, dict(include=words))
+
+    def test_included_words_appear_even_when_missing_from_the_dictionary(self):
+        p = grid(['....', '.#.#', '....'])
+        for seed in range(4):
+            result = generate(p, WORDS, seed=seed, include=['TONE', 'ANTE'], unique=False)
+            with self.subTest(seed=seed):
+                self.assertEqual(result['status'], 'generated', result)
+                self.assertTrue({'TONE', 'ANTE'} <= set(words_in(p, result['answer'])))
+                self.assertEqual(result['stats']['included'], 2)
+                self.assertEqual(result['diagnostics'], ['ANTE is not in the dictionary and counted as a word for this puzzle only.'])
+
+
+class DifficultyTests(unittest.TestCase):
+    def test_measured_grade_matches_what_deduction_can_do(self):
+        import random
+        from app.generator import _Filler, _numbered
+        p = grid(['....', '.#.#', '....'])
+        slots = layout(p)
+        seen = set()
+        for seed in range(12):
+            result = generate(p, WORDS, seed=seed, starters=seed % 3, difficulty='hard')
+            answer = {i: letter for i, letter in enumerate(result['answer']) if letter}
+            numbered = dict(cells=result['cells'])
+            def solves(letters_too):
+                solver = _Filler(numbered, slots, WORDS, random.Random(0), float('inf'), lambda: False, lambda u: None, distinct=False)
+                return solver.deduce(letters_too) and all(solver.known(i) == letter for i, letter in answer.items())
+            expected = 'easy' if solves(False) else 'medium' if solves(True) else 'hard'
+            seen.add(result['grade'])
+            with self.subTest(seed=seed):
+                self.assertEqual(result['grade'], expected)
+                self.assertEqual(result['uniqueness'], 'unique')
+        self.assertGreater(len(seen), 1, 'The fixtures cover more than one level')
+
+    def test_easy_and_medium_requests_are_solvable_by_deduction(self):
+        p = grid(['....', '.#.#', '....'])
+        for difficulty in ('easy', 'medium'):
+            for seed in range(4):
+                result = generate(p, WORDS, seed=seed, starters=0, difficulty=difficulty)
+                with self.subTest(difficulty=difficulty, seed=seed):
+                    self.assertIn(result['grade'], ('easy', 'medium') if difficulty == 'medium' else ('easy',))
+                    self.assertEqual(result['uniqueness'], 'unique')
+                    self.assertEqual(len(result['givens']), result['stats']['extraGivens'], 'Letters were added from zero starters')
+
+    def test_hard_starts_from_rare_letters_and_easy_from_frequent_ones(self):
+        from app.generator import _starters
+        import random
+        letters = dict(enumerate('EEEEEEEEEEEEQ'))
+        easy = sum('E' in _starters(letters, set(), 1, 'easy', random.Random(k)) for k in range(200))
+        hard = sum('Q' in _starters(letters, set(), 1, 'hard', random.Random(k)) for k in range(200))
+        self.assertGreater(easy, 190)
+        self.assertGreater(hard, 190)
 
 
 class FillTests(unittest.TestCase):
@@ -204,6 +267,9 @@ class GenerateHTTPTests(unittest.TestCase):
         self.assertIn('not part of any word', body['error'])
         code, body = self.request('/api/generate-jobs', dict(puzzle=grid(['...']), options=dict(starters=-1)))
         self.assertEqual(code, 400)
+        code, body = self.request('/api/generate-jobs', dict(puzzle=grid(['...']), options=dict(include=['HOUSE'])))
+        self.assertEqual(code, 400)
+        self.assertIn('HOUSE has 5 letters', body['error'])
 
 
 class StoredAnswerTests(unittest.TestCase):
@@ -215,7 +281,8 @@ class StoredAnswerTests(unittest.TestCase):
         p['generated'] = dict(answer=['C', 'A', 'T'], numbers=['1', '2', '3'], seed=4)
         check_puzzle(p)
         for bad in [dict(answer=['C', 'A'], numbers=['1', '2', '3']), dict(answer=['C', 'A', 'TT'], numbers=['1', '2', '3']),
-                    dict(answer=['C', 'A', 'T'], numbers=['1', '2', '100']), dict(answer=['C', 'A', 'T'], numbers=['1', '2', '3'], seed='x'), []]:
+                    dict(answer=['C', 'A', 'T'], numbers=['1', '2', '100']), dict(answer=['C', 'A', 'T'], numbers=['1', '2', '3'], seed='x'),
+                    dict(answer=['C', 'A', 'T'], numbers=['1', '2', '3'], grade='expert'), []]:
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 check_puzzle(dict(p, generated=bad))
         seen = []

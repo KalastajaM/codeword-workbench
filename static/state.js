@@ -444,13 +444,18 @@ function answerCheckText(check){
  if(!entered)return `No letters yet; ${check.total} cells to fill.`;
  return `${entered} of ${check.total} cells filled: ${check.right} right, ${wrong} wrong${wrong?' (outlined in red)':''}. ${check.empty} cell${check.empty===1?'':'s'} still empty.`;
 }
+const LEVEL_NAMES={easy:'Easy',medium:'Medium',hard:'Hard'};
+const LEVEL_MEANING={easy:'it can be solved word by word',medium:'in places it needs letters that every fitting word agrees on',hard:'deduction alone does not solve it everywhere'};
 function generatedSummary(result){
- const {words,distinctLetters,extraGivens=0}=result.stats,givens=result.givens||[];
- const filled=`Generated ${words} words using ${distinctLetters} letters, ${givens.length} given (${givens.join(', ')||'none'}).`;
- const extra=extraGivens?` ${extraGivens} of them ${extraGivens===1?'was':'were'} added to rule out other answers.`:'';
- if(result.uniqueness==='unique')return `${filled}${extra} Only one answer fits with the current dictionary.`;
- if(result.uniqueness==='unconfirmed')return `${filled}${extra} A single answer is not confirmed: the check stopped at its time limit.`;
- return `${filled} Not checked for other answers.`;
+ const {words,distinctLetters,extraGivens=0,included=0}=result.stats,givens=result.givens||[];
+ const filled=`Generated ${words} words using ${distinctLetters} letters, ${givens.length} given (${givens.join(', ')||'none'}).`+(included?` ${included===1?'The word you listed is':included===2?'Both words you listed are':`All ${included} words you listed are`} included.`:'');
+ const graded=['easy','medium'].includes(result.difficulty);
+ const extra=extraGivens?` ${extraGivens} of the given letters ${extraGivens===1?'was':'were'} added ${graded?'to reach the difficulty':'to rule out other answers'}.`:'';
+ const asked=result.difficulty&&result.difficulty!=='any'?result.difficulty:null;
+ const level=result.grade?` Difficulty: ${LEVEL_NAMES[result.grade]}; ${LEVEL_MEANING[result.grade]}.`+(asked&&asked!==result.grade?` You asked for ${LEVEL_NAMES[asked]}; this was the closest after trying other starter letters.`:''):asked?' The difficulty could not be checked in time.':'';
+ if(result.uniqueness==='unique')return `${filled}${extra} Only one answer fits with the current dictionary.${level}`;
+ if(result.uniqueness==='unconfirmed')return `${filled}${extra} A single answer is not confirmed: the check stopped at its time limit.${level}`;
+ return `${filled} Not checked for other answers.${level}`;
 }
 // Finnish and Swedish add Å, Ä and Ö to A–Z.
 function nordicLetters(language){return language==='fi'||language==='sv';}

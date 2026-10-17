@@ -65,8 +65,18 @@ test('Generator summary states the single-answer result without overclaiming', (
   const {generatedSummary} = require('../static/state.js');
   const base = {givens: ['A', 'K', 'T'], stats: {words: 28, distinctLetters: 21, extraGivens: 1}};
   assert.equal(generatedSummary({...base, uniqueness: 'unique'}),
-    'Generated 28 words using 21 letters, 3 given (A, K, T). 1 of them was added to rule out other answers. Only one answer fits with the current dictionary.');
+    'Generated 28 words using 21 letters, 3 given (A, K, T). 1 of the given letters was added to rule out other answers. Only one answer fits with the current dictionary.');
   assert.match(generatedSummary({...base, uniqueness: 'unconfirmed'}), /A single answer is not confirmed: the check stopped at its time limit\.$/);
   assert.equal(generatedSummary({givens: [], stats: {words: 4, distinctLetters: 5}, uniqueness: 'unchecked'}),
     'Generated 4 words using 5 letters, 0 given (none). Not checked for other answers.');
+  assert.equal(generatedSummary({...base, stats: {...base.stats, included: 2}, uniqueness: 'unique', difficulty: 'easy', grade: 'easy'}),
+    'Generated 28 words using 21 letters, 3 given (A, K, T). Both words you listed are included. 1 of the given letters was added to reach the difficulty. Only one answer fits with the current dictionary. Difficulty: Easy; it can be solved word by word.');
+  assert.match(generatedSummary({...base, uniqueness: 'unique', difficulty: 'hard', grade: 'medium'}),
+    /Difficulty: Medium; .* You asked for Hard; this was the closest after trying other starter letters\.$/);
+});
+
+test('The sheet prints the difficulty only when it is given', () => {
+  const puzzle = generated();
+  assert.match(sheetSvg(puzzle, {grade: 'medium'}), />Difficulty: Medium</);
+  assert.doesNotMatch(sheetSvg(puzzle), /Difficulty/);
 });
