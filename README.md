@@ -53,7 +53,7 @@ a dictionary, replays how the grid settled and reports how many cells match
 the known answer, with a caption for each step (about 30 seconds; with
 recognition unavailable it starts from the typed-in grid). **Full-size
 showcase** loads the same puzzle to solve yourself, **Try the sample page**
-(under Image or PDF) imports only the image, and **Try a small example** loads
+(under Image or PDF) imports only the image, and **Small showcase** loads
 a 3 × 3 word square. Use `--port 8766` if the port is
 taken and `--data-dir /path` to keep data elsewhere. On macOS, `start.command` starts
 the server with a double-click.
