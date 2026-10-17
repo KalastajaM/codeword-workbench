@@ -50,7 +50,7 @@ class LayoutTests(unittest.TestCase):
     def test_empty_grid_and_bad_options(self):
         with self.assertRaisesRegex(ValueError, 'at least one word'):
             layout(grid(['#.#']))
-        for bad in [dict(starters=11), dict(starters=True), dict(seconds=0), dict(seconds=True), dict(seed='1'), []]:
+        for bad in [dict(starters=11), dict(starters=True), dict(seconds=0), dict(seconds=True), dict(seed='1'), dict(unique=1), []]:
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 options(bad)
 
@@ -117,6 +117,38 @@ class FillTests(unittest.TestCase):
         self.assertEqual(missing['status'], 'no_fill')
         self.assertEqual(missing['diagnostics'], ['The dictionary has no words of length 6.'])
 
+    def test_second_answer_is_ruled_out_with_an_extra_given_letter(self):
+        p = grid(['...'])
+        result = generate(p, ['CAT', 'COT'], seed=0, starters=0)
+        self.assertEqual(result['uniqueness'], 'unique')
+        self.assertEqual(result['stats']['extraGivens'], 1)
+        self.assertEqual(result['givens'], [result['answer'][1]], 'The given letter is the one the answers differ in')
+        unchecked = generate(p, ['CAT', 'COT'], seed=0, starters=0, unique=False)
+        self.assertEqual((unchecked['uniqueness'], unchecked['givens']), ('unchecked', []))
+
+    def test_answer_count_matches_the_solver(self):
+        from app import solver
+        from app.generator import _Filler, _numbered
+        import random
+        p = grid(['....', '.#.#', '....'])
+        slots = layout(p)
+        limit, solver.MAX_CANDIDATES = solver.MAX_CANDIDATES, 10 ** 6  # every candidate, as the benchmark script does
+        try:
+            for seed in range(6):
+                result = generate(p, WORDS, seed=seed, starters=seed % 2, unique=False)
+                numbered = dict(p, cells=result['cells'], rules=solver.default_rules('en'), useDictionary=True,
+                                allowUnknownWords=False, searchMode='extended')
+                found, reason = _Filler(numbered, slots, WORDS, random.Random(0), float('inf'), lambda: False,
+                                        lambda update: None, distinct=False).count(50)
+                solved = solver.solve(numbered, WORDS)
+                with self.subTest(seed=seed):
+                    self.assertEqual(reason, 'search_exhausted')
+                    self.assertTrue(solved['stats']['exhaustive'])
+                    self.assertEqual(sorted(''.join(f[i] for i in sorted(f)) for f in found),
+                                     sorted(''.join(l for l in s['letters'] if l) for s in solved['solutions']))
+        finally:
+            solver.MAX_CANDIDATES = limit
+
     def test_cancel_stops_the_search(self):
         result = generate(grid(['....', '.#.#', '....']), WORDS, seed=0, cancel=lambda: True)
         self.assertEqual(result['status'], 'cancelled')
@@ -153,7 +185,7 @@ class GenerateHTTPTests(unittest.TestCase):
     def test_job_fills_grid_from_the_saved_dictionary(self):
         import time
         p = dict(grid(['....', '.#.#', '....']), name='Drawn', useDictionary=True)
-        code, job = self.request('/api/generate-jobs', dict(puzzle=p, options=dict(starters=0, seed=5)))
+        code, job = self.request('/api/generate-jobs', dict(puzzle=p, options=dict(starters=0, seed=5, unique=False)))
         self.assertEqual(code, 202, job)
         until = time.monotonic() + 5
         while job['status'] == 'running' and time.monotonic() < until:
@@ -162,6 +194,7 @@ class GenerateHTTPTests(unittest.TestCase):
         result = job['result']
         self.assertEqual(result['status'], 'generated')
         self.assertEqual(result['givens'], [])
+        self.assertEqual(result['uniqueness'], 'unchecked')
         self.assertEqual(result['diagnostics'], [], 'A saved dictionary needs no demonstration-list note')
         self.assertTrue(set(words_in(p, result['answer'])) <= set(WORDS))
 

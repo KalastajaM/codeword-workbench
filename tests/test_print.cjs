@@ -60,3 +60,13 @@ test('Answer check counts confirmed letters only and stops when the grid changes
   assert.equal(answerCheck(puzzle), null);
   assert.equal(answerCheck(canonicalPuzzle({rows: 1, cols: 1, language: 'en', cells: [{}]})), null);
 });
+
+test('Generator summary states the single-answer result without overclaiming', () => {
+  const {generatedSummary} = require('../static/state.js');
+  const base = {givens: ['A', 'K', 'T'], stats: {words: 28, distinctLetters: 21, extraGivens: 1}};
+  assert.equal(generatedSummary({...base, uniqueness: 'unique'}),
+    'Generated 28 words using 21 letters, 3 given (A, K, T). 1 of them was added to rule out other answers. Only one answer fits with the current dictionary.');
+  assert.match(generatedSummary({...base, uniqueness: 'unconfirmed'}), /A single answer is not confirmed: the check stopped at its time limit\.$/);
+  assert.equal(generatedSummary({givens: [], stats: {words: 4, distinctLetters: 5}, uniqueness: 'unchecked'}),
+    'Generated 4 words using 5 letters, 0 given (none). Not checked for other answers.');
+});

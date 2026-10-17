@@ -178,6 +178,7 @@ button.rule-out-group{padding:3px 7px;font-size:11px;background:transparent;colo
 
 .certainty-close-dot{background:#f2a68c}.certainty-moderate-dot{background:#f7d6c8}#certainty-legend{display:flex;align-items:center;gap:5px}.certainty-controls{margin-top:10px}
 .image-mode .cell.certainty-close:not(.black){background-color:rgba(242,166,140,.75)}.image-mode .cell.certainty-moderate:not(.black){background-color:rgba(247,214,200,.7)}
+#check-answers{margin-top:8px}
 /* Generated puzzles: letters the answer check found wrong. */
 .cell.wrong:not(.black){box-shadow:inset 0 0 0 3px #e0443a}
 #print-dialog{max-width:860px}.print-options{display:flex;flex-wrap:wrap;gap:6px 22px}.print-options label{margin:6px 0}

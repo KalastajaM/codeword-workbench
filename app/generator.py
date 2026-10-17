@@ -7,7 +7,11 @@ numbers get different letters. The fill is a randomised backtracking search
 with restarts that stops at a time limit. Not finding a fill in time does not
 prove that none exists; only a search that ran out of options says so.
 
-Whether the numbered grid has exactly one answer is not checked here.
+The numbered grid is then searched again for every answer that fits, with
+repeated words allowed, as a solver would. While a second answer exists, a
+letter that tells the two apart is given and the grid is checked again. Only
+a search that ran out of options confirms a single answer, and only within
+this dictionary.
 """
 import random
 import time
@@ -25,6 +29,10 @@ class _Stop(Exception):
 
 
 class _Restart(Exception):
+    pass
+
+
+class _Enough(Exception):
     pass
 
 
@@ -82,9 +90,10 @@ class _Filler:
     by its known letters is a handful of big-integer ANDs.
     """
 
-    def __init__(self, puzzle, slots, words, rng, deadline, cancel, progress):
+    def __init__(self, puzzle, slots, words, rng, deadline, cancel, progress, distinct=True, stage='filling'):
         self.cells, self.slots, self.rng = puzzle['cells'], slots, rng
         self.deadline, self.cancel, self.progress = deadline, cancel, progress
+        self.distinct, self.stage, self.found = distinct, stage, None
         lengths = {len(slot) for slot in slots}
         self.words, self.masks, self.full = {}, {}, {}
         for length in lengths:
@@ -112,6 +121,7 @@ class _Filler:
         self.used = {length: 0 for length in lengths}
         self.nodes = self.restarts = 0
         self.last_report = 0.0
+        self.forbidden = {}
 
     def known(self, i):
         letter = self.letters.get(i)
@@ -129,9 +139,15 @@ class _Filler:
             if letter:
                 mask &= masks[pos].get(letter, 0)
             elif self.cells[i].get('number') and self.letter_number:
-                # A numbered cell cannot take a letter that belongs to another number.
-                for owned in self.letter_number:
-                    mask &= ~masks[pos].get(owned, 0)
+                # A numbered cell cannot take a letter that belongs to another
+                # number. Cached until the number mappings change.
+                key = (length, pos)
+                if key not in self.forbidden:
+                    taken = 0
+                    for owned in self.letter_number:
+                        taken |= masks[pos].get(owned, 0)
+                    self.forbidden[key] = taken
+                mask &= ~self.forbidden[key]
             if not mask:
                 return 0
         return mask
@@ -153,6 +169,7 @@ class _Filler:
                     self.number_letter[number] = letter
                     self.letter_number[letter] = number
                     set_numbers.append(number)
+                    self.forbidden.clear()
             if i not in self.letters:
                 self.letters[i] = letter
                 set_cells.append(i)
@@ -164,6 +181,8 @@ class _Filler:
             del self.letters[i]
         for number in set_numbers:
             del self.letter_number[self.number_letter.pop(number)]
+        if set_numbers:
+            self.forbidden.clear()
 
     def tick(self):
         now = time.monotonic()
@@ -173,7 +192,7 @@ class _Filler:
             raise _Stop('time_limit')
         if now - self.last_report > 0.25:
             self.last_report = now
-            self.progress(dict(stage='filling', nodes=self.nodes, restarts=self.restarts))
+            self.progress(dict(stage=self.stage, nodes=self.nodes, restarts=self.restarts))
 
     def members(self, mask):
         """Set bits of mask, starting at a random bit and wrapping around."""
@@ -187,7 +206,12 @@ class _Filler:
     def search(self, open_slots, budget):
         self.tick()
         if not open_slots:
-            return True
+            if self.found is None:
+                return True
+            self.found.append(dict(self.letters))
+            if len(self.found) >= self.limit:
+                raise _Enough()
+            return False
         best = best_mask = None
         for slot in open_slots:
             mask = self.options(slot)
@@ -206,10 +230,12 @@ class _Filler:
             change = self.place(best, self.words[length][k])
             if change is None:
                 continue
-            self.used[length] |= 1 << k
+            if self.distinct:
+                self.used[length] |= 1 << k
             if self.search(rest, budget):
                 return True
-            self.used[length] &= ~(1 << k)
+            if self.distinct:
+                self.used[length] &= ~(1 << k)
             self.undo(change)
         return False
 
@@ -231,6 +257,17 @@ class _Filler:
                 return None, str(stop)
             return (dict(self.letters), 'filled') if found else (None, 'search_exhausted')
 
+    def count(self, limit):
+        """(answers found, stop reason): every answer up to limit, without restarts."""
+        self.found, self.limit = [], limit
+        try:
+            self.search(list(self.slots), float('inf'))
+        except _Enough:
+            return self.found, 'limit'
+        except _Stop as stop:
+            return self.found, str(stop)
+        return self.found, 'search_exhausted'
+
 
 def _numbering(cells, letters, rng):
     """Number per letter: fixed numbers kept, the rest from the smallest free numbers in random order."""
@@ -248,29 +285,75 @@ def _numbering(cells, letters, rng):
 
 
 def options(raw):
-    """Checked generator options: starters, seconds and an optional seed."""
+    """Checked generator options: starters, seconds, unique and an optional seed."""
     if not isinstance(raw, dict):
         raise ValueError('Generator options must be an object.')
     starters, seconds, seed = raw.get('starters', 2), raw.get('seconds', DEFAULT_SECONDS), raw.get('seed')
+    unique = raw.get('unique', True)
     if type(starters) is not int or not 0 <= starters <= MAX_STARTERS:
         raise ValueError(f'Starter letters must be a whole number from 0 to {MAX_STARTERS}.')
     if type(seconds) not in (int, float) or not 1 <= seconds <= MAX_SECONDS:
         raise ValueError(f'Generating time must be between 1 and {MAX_SECONDS} seconds.')
+    if type(unique) is not bool:
+        raise ValueError('The single-answer setting must be true or false.')
     if seed is not None and (type(seed) is not int or not 0 <= seed < 1 << 31):
         raise ValueError('The generator seed must be a whole number from 0 to 2147483647.')
-    return dict(starters=starters, seconds=seconds, seed=seed)
+    return dict(starters=starters, seconds=seconds, unique=unique, seed=seed)
 
 
-def generate(puzzle, words, *, starters=2, seconds=DEFAULT_SECONDS, seed=None, cancel=lambda: False, progress=lambda update: None):
+def _numbered(cells, letters, numbers, given):
+    """Cells as the solver sees them: every letter cell numbered, given letters filled in."""
+    out = []
+    for i, cell in enumerate(cells):
+        if cell.get('black'):
+            out.append(dict(black=True, number='', letter=''))
+            continue
+        shown = letters[i] if letters[i] in given else ''
+        out.append(dict(black=False, number=numbers[letters[i]], letter=shown, prefilled=bool(shown)))
+    return out
+
+
+def _single_answer(cells, slots, words, letters, numbers, given, rng, deadline, cancel, progress):
+    """Give letters until no other answer fits: (given, outcome, extra letters, search nodes).
+
+    outcome is 'unique' only when the search ran out of options with one
+    answer left; 'unconfirmed' when it stopped at the time limit.
+    """
+    extra = nodes = 0
+    while True:
+        checker = _Filler(dict(cells=_numbered(cells, letters, numbers, given)), slots, words, rng,
+                          deadline, cancel, progress, distinct=False, stage='checking')
+        found, reason = checker.count(2)
+        nodes += checker.nodes
+        if reason == 'cancelled':
+            raise _Stop('cancelled')
+        if reason == 'time_limit':
+            return given, 'unconfirmed', extra, nodes
+        others = [answer for answer in found if answer != letters]
+        if not others:
+            return given, 'unique' if reason == 'search_exhausted' else 'unconfirmed', extra, nodes
+        # Give one letter whose number takes another letter in the rival answer.
+        rival = others[0]
+        differing = sorted({letters[i] for i in rival if rival[i] != letters[i]} - given)
+        if not differing:
+            return given, 'unconfirmed', extra, nodes
+        given = given | {rng.choice(differing)}
+        extra += 1
+
+
+def generate(puzzle, words, *, starters=2, seconds=DEFAULT_SECONDS, unique=True, seed=None,
+             cancel=lambda: False, progress=lambda update: None):
     """Fill, number and choose starter letters for a drawn grid.
 
     starters is how many letters to give in addition to the letters already
-    in the grid. The result holds the numbered cells (only given letters
-    filled in) and the full answer; the answer is not shown as letters.
+    in the grid. With unique, more letters are given while another answer
+    fits. Filling and checking each get up to seconds. The result holds the
+    numbered cells (only given letters filled in) and the full answer; the
+    answer is not shown as letters.
     """
     started = time.monotonic()
     slots = layout(puzzle)
-    starters, seconds, seed = options(dict(starters=starters, seconds=seconds, seed=seed)).values()
+    starters, seconds, unique, seed = options(dict(starters=starters, seconds=seconds, unique=unique, seed=seed)).values()
     seed = random.SystemRandom().randrange(1 << 31) if seed is None else seed
     rng = random.Random(seed)
     alphabet = set(ALPHABETS[puzzle['language']])
@@ -296,15 +379,20 @@ def generate(puzzle, words, *, starters=2, seconds=DEFAULT_SECONDS, seed=None, c
     given = {cell['letter'] for cell in cells if not cell.get('black') and cell.get('letter')}
     choices = sorted(set(letters.values()) - given)
     given |= set(rng.sample(choices, min(starters, len(choices))))
-    out, answer = [], []
-    for i, cell in enumerate(cells):
-        if cell.get('black'):
-            out.append(dict(black=True, number='', letter=''))
-            answer.append('')
-            continue
-        letter = letters[i]
-        shown = letter if letter in given else ''
-        out.append(dict(black=False, number=numbers[letter], letter=shown, prefilled=bool(shown)))
-        answer.append(letter)
-    stats.update(distinctLetters=len(numbers))
-    return dict(status='generated', cells=out, answer=answer, givens=sorted(given), stats=stats, diagnostics=diagnostics)
+    uniqueness, extra = 'unchecked', 0
+    if unique:
+        checked = time.monotonic()
+        try:
+            given, uniqueness, extra, check_nodes = _single_answer(cells, slots, usable, letters, numbers, given, rng,
+                                                                  checked + seconds, cancel, progress)
+        except _Stop:
+            stats.update(elapsedSeconds=round(time.monotonic() - started, 3), stopReason='cancelled', exhaustive=False)
+            return dict(status='cancelled', stats=stats, diagnostics=diagnostics)
+        stats.update(checkNodes=check_nodes, checkSeconds=round(time.monotonic() - checked, 3))
+        if uniqueness == 'unconfirmed':
+            diagnostics.append('The check for other answers stopped at its time limit, so a single answer is not confirmed.')
+    out = _numbered(cells, letters, numbers, given)
+    answer = ['' if cell.get('black') else letters[i] for i, cell in enumerate(cells)]
+    stats.update(distinctLetters=len(numbers), extraGivens=extra, elapsedSeconds=round(time.monotonic() - started, 3))
+    return dict(status='generated', cells=out, answer=answer, givens=sorted(given), uniqueness=uniqueness,
+                stats=stats, diagnostics=diagnostics)
