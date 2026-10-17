@@ -1,0 +1,100 @@
+{
+ "note": "Original 13 x 13 grids built by scripts/build_sample_puzzle.py from common English words. The first is the in-app showcase.",
+ "puzzles": [
+  {
+   "name": "showcase",
+   "language": "en",
+   "rows": [
+    "LUCY#STOPPING",
+    "E#O###H#I#S#E",
+    "ACRE#DOWNTOWN",
+    "N#E#D#U#E#L#E",
+    "###LODGE#HAIR",
+    "S#I#I#H#K#T#A",
+    "TUNING#INTENT",
+    "R#T#G#C#O#D#E",
+    "EVEN#MATCH###",
+    "N#R#B#N#K#C#F",
+    "GUIDANCE#TAIL",
+    "T#O#L#E###L#E",
+    "HORRIBLE#FLUX"
+   ]
+  },
+  {
+   "name": "grid-2",
+   "language": "en",
+   "rows": [
+    "RECIPE#NIGHTS",
+    "E#O#R###D#O#P",
+    "EMPLOY#CLOSER",
+    "D#E#G#C#E#P#I",
+    "###URBAN#LION",
+    "V#O#E#M#R#T#G",
+    "EXCUSE#RELATE",
+    "R#C#S#H#M#L#R",
+    "THAT#SAVED###",
+    "I#S#S#Y#M#T#A",
+    "CLINIC#OBJECT",
+    "A#O#T###E#C#O",
+    "LENDER#GRAHAM"
+   ]
+  },
+  {
+   "name": "grid-3",
+   "language": "en",
+   "rows": [
+    "EARN#REPEATED",
+    "N#E###X#X#H#A",
+    "TEST#MAJORITY",
+    "I#E#R#M#T#S#S",
+    "REASON#DIS###",
+    "E#R#B#S#C#H#P",
+    "LUCK#NUT#HEAR",
+    "Y#H#A#R#T#R#E",
+    "###OFF#BAKING",
+    "M#P#F#S#X#T#N",
+    "ECONOMIC#DATA",
+    "S#P#R#G###G#N",
+    "SPENDING#WENT"
+   ]
+  },
+  {
+   "name": "grid-4",
+   "language": "en",
+   "rows": [
+    "BALL#PERIODIC",
+    "A#I###M#N#R#O",
+    "BITE#EMISSION",
+    "Y#E###A#E#N#C",
+    "#######BROKER",
+    "S#R###M#T#I#E",
+    "UPON#CAN#UNIT",
+    "N#U#N#P###G#E",
+    "SELLER#######",
+    "H#E#A#P###G#S",
+    "INTERNAL#WEST",
+    "N#T#B#R###N#O",
+    "EVERYDAY#DEEP"
+   ]
+  },
+  {
+   "name": "grid-5",
+   "language": "en",
+   "rows": [
+    "WISE#BEGINNER",
+    "I#E###A#S#O#E",
+    "NEXT#ISOLATED",
+    "D#U###Y#A#I#E",
+    "OVAL###INCOME",
+    "W#L###C#D#N#M",
+    "#####TUB#####",
+    "F#P#W#T###C#S",
+    "ABROAD###FIST",
+    "M#E#R#K###N#R",
+    "OFFERING#GENE",
+    "U#E#E#I###M#S",
+    "STRENGTH#PASS"
+   ]
+  }
+ ]
+}

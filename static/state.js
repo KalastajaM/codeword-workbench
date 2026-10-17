@@ -31,6 +31,17 @@ function suggestedLetter(puzzle,index,solutionIndex=0){
  const cell=puzzle.cells[index];if(!cell||cell.black)return '';
  return puzzle.suggestions?.forcedLetters?.[index]||puzzle.suggestions?.solutions?.[solutionIndex]?.letters?.[index]||puzzle.suggestions?.partialLetters?.[index]||cell.guess||'';
 }
+// Cells whose number has a rival letter scoring almost as well in the selected
+// dictionary-free alternative. A close rival marks where to check first; a
+// clear lead is not proof the letter is right.
+function weakLetters(puzzle,solutionIndex=0){
+ const weak=puzzle.suggestions?.solutions?.[solutionIndex]?.weakNumbers;
+ return puzzle.cells.map(cell=>{
+  if(!weak||cell.black||cell.letter||!cell.number)return null;
+  const info=weak[String(Number(cell.number))];
+  return info?{number:String(Number(cell.number)),alternative:info.alternative,margin:info.margin}:null;
+ });
+}
 function suggestionLabel(puzzle,index,solutionIndex=0){
  if(puzzle.suggestions?.forcedLetters?.[index])return 'Mapping deduction';
  if(puzzle.suggestions?.solutions?.[solutionIndex]?.letters?.[index])return 'Suggested';
@@ -505,5 +516,5 @@ function solveProgressText(progress,stopping){
  if(PREPARATION_STAGES.has(stage))return `Preparing: ${stage==='preparing'?'loading puzzle and dictionary':stage.replaceAll('_',' ')} · ${seconds} · search time starts after this`;
  return `${stage.replaceAll('_',' ')} · ${Number(p.nodes||0).toLocaleString()} search nodes · ${seconds} · ${Number(p.solutionsFound||0)} suggestions found`;
 }
-const helpers={savedPuzzleView,renumberCell,workspaceModeView,visibleRuledOut,numberIsOpen,canonicalEliminations,ruledOutLetters,setRuledOut,slotIdentity,rejectedWordsFor,setWordRejected,eliminationSuggestionGroups,wordAssessmentQueue,assessedWord,assessedWordLabel,displayedPuzzleWords,solvedWordActions,solvedWordEvidence,solvedWordsView,solvedWordSelection,solvedWordPatternScore,mappingCyclePlan,numberMovePlan,clearMappingProvenance,numberRemovalPlan,numberAssignmentPlan,dictionaryInputWords,dictionarySearchSummary,nordicLetters,completeWordText,selectedWordCheckText,patternScoreText,candidateEvidenceText,wordLookupText,lookupPattern,dictionaryPages,languagePresentation,dictionaryEditor,cellWord,letterOwners,moveLetterAssignment,resetSuggestions,editConfirmedLetter,cancelledResult,solveProgressText,solveStopExplanation,hasSolveProgress,mappingLetterInfo,changeMappingLetter,resetProgress,suggestionLabel,restoredWords,wordEvidenceLabel,plausibilityLabel,plausibilityDetail,candidateDisplay,solveRunner,canonicalPuzzle,slots,candidateLetters,matchesSlot,blankCell,numberEntry,imageBoundsFromPercent,fitScale,suggestedLetter,mappingDeductions,solveSummary,refreshDeductions,confirmCells,unconfirmCells,numberCells,undoConfirmation,acceptanceHistory,wordChoices,candidateSelection,candidateSearchPuzzle};if(typeof module!=='undefined'&&module.exports)module.exports=helpers;else root.PuzzleState=helpers;
+const helpers={weakLetters,savedPuzzleView,renumberCell,workspaceModeView,visibleRuledOut,numberIsOpen,canonicalEliminations,ruledOutLetters,setRuledOut,slotIdentity,rejectedWordsFor,setWordRejected,eliminationSuggestionGroups,wordAssessmentQueue,assessedWord,assessedWordLabel,displayedPuzzleWords,solvedWordActions,solvedWordEvidence,solvedWordsView,solvedWordSelection,solvedWordPatternScore,mappingCyclePlan,numberMovePlan,clearMappingProvenance,numberRemovalPlan,numberAssignmentPlan,dictionaryInputWords,dictionarySearchSummary,nordicLetters,completeWordText,selectedWordCheckText,patternScoreText,candidateEvidenceText,wordLookupText,lookupPattern,dictionaryPages,languagePresentation,dictionaryEditor,cellWord,letterOwners,moveLetterAssignment,resetSuggestions,editConfirmedLetter,cancelledResult,solveProgressText,solveStopExplanation,hasSolveProgress,mappingLetterInfo,changeMappingLetter,resetProgress,suggestionLabel,restoredWords,wordEvidenceLabel,plausibilityLabel,plausibilityDetail,candidateDisplay,solveRunner,canonicalPuzzle,slots,candidateLetters,matchesSlot,blankCell,numberEntry,imageBoundsFromPercent,fitScale,suggestedLetter,mappingDeductions,solveSummary,refreshDeductions,confirmCells,unconfirmCells,numberCells,undoConfirmation,acceptanceHistory,wordChoices,candidateSelection,candidateSearchPuzzle};if(typeof module!=='undefined'&&module.exports)module.exports=helpers;else root.PuzzleState=helpers;
 })(typeof globalThis!=='undefined'?globalThis:this);
