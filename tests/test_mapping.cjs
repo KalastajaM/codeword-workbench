@@ -46,9 +46,12 @@ test('Invalidating lookup releases disabled button and ignores old results',asyn
 test('Solve and Cancel share the solver busy state',()=>{
  const vm=require('node:vm'),fs=require('node:fs'),source=fs.readFileSync(require.resolve('../static/app.js'),'utf8');
  const nodes={},$=id=>nodes[id]??={disabled:false,hidden:true,textContent:'',click(){if(!this.disabled)this.onclick?.();}};let calls=0;$('solve').onclick=()=>calls++;
- const busyCode=source.match(/onBusy:busy=>(.*),\n onStopping:/)[1];const busy=vm.runInNewContext('(busy=>'+busyCode+')',{$,stopSearchPrompt:false});busy(true);
+ const busyCode=source.match(/onBusy:busy=>(.*),\n onStopping:/)[1];const notices=[],context={$,stopSearchPrompt:false,noticeIsProgress:false,notify:message=>{notices.push(message);context.noticeIsProgress=false;}};const busy=vm.runInNewContext('(busy=>'+busyCode+')',context);busy(true);
  assert.equal($('solve').disabled,true);assert.equal($('solve').textContent,'Solving…');assert.equal($('cancel-solve').hidden,false);$('solve').click();assert.equal(calls,0);
  busy(false);assert.equal($('solve').textContent,'Solve puzzle →');assert.equal($('cancel-solve').hidden,true);$('solve').click();assert.equal(calls,1);
+ assert.deepEqual(notices,[],'a search that ended with its own message adds none');
+ busy(true);context.noticeIsProgress=true;busy(false);
+ assert.deepEqual(notices,['Search stopped before it finished. Its unfinished results were discarded.'],'progress left in the top message is replaced when a search is abandoned');
 });
 test('Removing a pair preserves numbers, other variant letters and unrelated hypotheses; undo restores prefills',()=>{
  const p=make([{number:'1',letter:'A',prefilled:true},{number:'1',guess:'A'},{number:'1',letter:'B',prefilled:false},{number:'2',guess:'C'}],{maxLettersPerNumber:2});const before=JSON.stringify(p);
