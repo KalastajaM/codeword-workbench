@@ -466,10 +466,11 @@ function layoutSummary(puzzle){
  return {words:runs.length,shortest:lengths.length?Math.min(...lengths):0,longest:lengths.length?Math.max(...lengths):0,
   loose:puzzle.cells.filter((c,i)=>!c.black&&!covered.has(i)).length};
 }
+// Shown in the grid summary line, for example "71 words of 4–10 letters".
 function layoutSummaryText(summary){
- if(!summary.words)return 'No words yet: draw black cells, or set a target and place them.';
+ if(!summary.words)return 'no words yet';
  const lengths=summary.shortest===summary.longest?`${summary.shortest} letters`:`${summary.shortest}–${summary.longest} letters`;
- return `This grid has ${summary.words} word${summary.words===1?'':'s'} of ${lengths}.`+(summary.loose?` ${summary.loose} letter cell${summary.loose===1?' is':'s are'} in no word.`:'');
+ return `${summary.words} word${summary.words===1?'':'s'} of ${lengths}`+(summary.loose?` · ${summary.loose} cell${summary.loose===1?'':'s'} in no word`:'');
 }
 // Whether the grid already matches a word layout target.
 function meetsLayout(summary,target){return !summary.loose&&summary.words===target.words&&summary.shortest>=target.shortest&&summary.longest<=target.longest;}
@@ -479,9 +480,10 @@ function generatedSummary(result){
  const {words,distinctLetters,extraGivens=0,included=0}=result.stats,givens=result.givens||[];
  const filled=`Generated ${words} words using ${distinctLetters} letters, ${givens.length} given (${givens.join(', ')||'none'}).`+(included?` ${included===1?'The word you listed is':included===2?'Both words you listed are':`All ${included} words you listed are`} included.`:'');
  const graded=['easy','medium'].includes(result.difficulty);
- const extra=extraGivens?` ${extraGivens} of the given letters ${extraGivens===1?'was':'were'} added ${graded?'to reach the difficulty':'to rule out other answers'}.`:'';
- const asked=result.difficulty&&result.difficulty!=='any'?result.difficulty:null;
- const level=result.grade?` Difficulty: ${LEVEL_NAMES[result.grade]}; ${LEVEL_MEANING[result.grade]}.`+(asked&&asked!==result.grade?` You asked for ${LEVEL_NAMES[asked]}; this was the closest after trying other starter letters.`:''):asked?' The difficulty could not be checked in time.':'';
+ const asked=result.stats.starters,why=graded?'to reach the difficulty':'to rule out other answers';
+ const extra=extraGivens?` ${extraGivens} ${extraGivens===1?'letter was':'letters were'} added ${why}`+(asked!==undefined?` (you asked for ${asked} starter letter${asked===1?'':'s'}).`:'.'):'';
+ const askedLevel=result.difficulty&&result.difficulty!=='any'?result.difficulty:null;
+ const level=result.grade?` Difficulty: ${LEVEL_NAMES[result.grade]}; ${LEVEL_MEANING[result.grade]}.`+(askedLevel&&askedLevel!==result.grade?` You asked for ${LEVEL_NAMES[askedLevel]}; this was the closest after trying other starter letters.`:''):askedLevel?' The difficulty could not be checked in time.':'';
  if(result.uniqueness==='unique')return `${filled}${extra} Only one answer fits with the current dictionary.${level}`;
  if(result.uniqueness==='unconfirmed')return `${filled}${extra} A single answer is not confirmed: the check stopped at its time limit.${level}`;
  return `${filled} Not checked for other answers.${level}`;
