@@ -5,7 +5,8 @@ number is in `app/__init__.py`; `python3 run.py --version` prints it.
 
 ## 1.0.0 (2026-10-17)
 
-First release. Everything below is described in full in the
+First stable release, following the v0.1 alpha demo of 2026-10-16.
+Everything below is described in full in the
 [user guide](docs/user-guide.md).
 
 ### Import and recognition
